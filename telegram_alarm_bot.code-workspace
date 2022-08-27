@@ -4,5 +4,14 @@
 			"path": "."
 		}
     ],
-    "settings": {}
+    "settings": {
+        "cSpell.words": [
+            "mqtt",
+            "rumqttc",
+            "teloxide",
+            "tokio",
+            "zigbee"
+        ],
+        "cSpell.language": "en,fr-90"
+    }
 }
