@@ -1,3 +1,4 @@
+use lazy_static::lazy_static;
 use teloxide::prelude::*;
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet};
 use std::collections::HashMap;
@@ -5,8 +6,10 @@ use std::time::Duration;
 use regex::{Regex, Captures};
 
 fn parse_motion_sensor_name(sensor_name: &str) -> Option<Captures> {
-    let motion_sensor_re = Regex::new(r"^(?:(\w+) )?[Mm]otion sensor \((\d+)\)$").unwrap();
-    motion_sensor_re.captures(sensor_name)
+    lazy_static! {
+        static ref MOTION_SENSOR_RE: Regex = Regex::new(r"^(?:(\w+) )?[Mm]otion sensor \((\d+)\)$").unwrap();
+    }
+    MOTION_SENSOR_RE.captures(sensor_name)
 }
 
 fn process_door_sensor_notification(_sensor_name: &str, sensor_data: &HashMap<String, serde_json::Value>) -> Result<Option<String>, &'static str> {
