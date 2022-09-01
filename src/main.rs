@@ -3,74 +3,107 @@ use teloxide::prelude::*;
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet};
 use std::collections::HashMap;
 use std::time::Duration;
-use regex::{Regex, Captures};
+use regex::Regex;
 
-fn parse_motion_sensor_name(sensor_name: &str) -> Option<Captures> {
-    lazy_static! {
-        static ref MOTION_SENSOR_RE: Regex = Regex::new(r"^(?:(\w+) )?[Mm]otion sensor \((\d+)\)$").unwrap();
+type SensorData = HashMap<String, serde_json::Value>;
+
+const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(-688154163);
+
+enum Sensor {
+    Contact,
+    Motion {
+        location: Option<String>,
+        id: usize
     }
-    MOTION_SENSOR_RE.captures(sensor_name)
 }
 
-fn process_door_sensor_notification(_sensor_name: &str, sensor_data: &HashMap<String, serde_json::Value>) -> Result<Option<String>, &'static str> {
+impl Sensor {
 
-    let contact_value = match sensor_data.get("contact") {
-        Some(serde_json::Value::Bool(bool_value)) => bool_value,
-        _ => return Err("Unexpected value type for contact")
-    };
-
-    let message = match contact_value {
-        false => "La porte d'entrée vient d'être ouverte",
-        true => "La porte d'entrée vient d'être fermée"
-    };
-
-    Ok(Some(message.to_owned()))
-}
-
-fn process_motion_sensor_notification(sensor_name: &str, sensor_data: &HashMap<String, serde_json::Value>) -> Result<Option<String>, &'static str> {
-    let sensor_name_captures = parse_motion_sensor_name(sensor_name).ok_or("Failed to parse motion sensor name")?;
-
-    let occupancy_value = match sensor_data.get("occupancy") {
-        Some(serde_json::Value::Bool(bool_value)) => bool_value,
-        None => return Err("Cannot find occupancy value in motion sensor notification payload"),
-        _ => return Err("Unexpected value type for motion sensor notification's occupancy value")
-    };
-
-    if *occupancy_value {
-        let sensor_location = sensor_name_captures.get(1);
-        let sensor_id = sensor_name_captures.get(2);
-
-        match (sensor_location, sensor_id) {
-            (Some(sensor_location), Some(sensor_id)) =>
-                return Ok(Some(format!("Mouvement détecté dans {} (capteur #{})", sensor_location.as_str().to_lowercase(), sensor_id.as_str()))),
-            (None, Some(sensor_id)) =>
-                return Ok(Some(format!("Mouvement détecté par capteur #{}", sensor_id.as_str()))),
-            _ => unreachable!()
+    pub fn identify(sensor_name: &str) -> Result<Sensor, &'static str> {
+        match sensor_name {
+            "Door opening sensor" => Ok(Sensor::Contact),
+            _ => {
+                lazy_static! { static ref MOTION_SENSOR_RE: Regex = Regex::new(r"^(?:(?P<location>\w+) )?[Mm]otion sensor \((?P<id>\d+)\)$").unwrap(); }
+                if let Some(captures) = MOTION_SENSOR_RE.captures(sensor_name) {
+                    let id = captures.name("id").unwrap().as_str().parse::<usize>().unwrap();
+                    let location = captures.name("location").map(|rematch| rematch.as_str().to_owned());
+                    Ok(Sensor::Motion { location, id })
+                } else {
+                    Err("failed to parse sensor name")
+                }
+            }
         }
     }
 
-    Ok(None)
-}
-
-fn process_sensor_notification(sensor_name: &str, sensor_data: &HashMap<String, serde_json::Value>) -> Result<Option<String>, &'static str> {
-
-    match sensor_name {
-        "Door opening sensor" => process_door_sensor_notification(sensor_name, sensor_data),
-        _                     => process_motion_sensor_notification(sensor_name, sensor_data)
+    pub fn message(&self, sensor_data: &SensorData) -> Result<Option<String>, &'static str> {
+        match self {
+            Sensor::Contact => Self::contact_sensor_message(sensor_data),
+            Sensor::Motion { .. } => self.motion_sensor_message(sensor_data)
+        }
     }
+
+    fn contact_sensor_message(sensor_data: &SensorData) -> Result<Option<String>, &'static str> {
+
+        let contact_value = match sensor_data.get("contact") {
+            Some(serde_json::Value::Bool(bool_value)) => bool_value,
+            _ => return Err("Unexpected value type for contact")
+        };
+
+        let message = match contact_value {
+            false => "La porte d'entrée vient d'être ouverte",
+            true => "La porte d'entrée vient d'être fermée"
+        };
+
+        Ok(Some(message.to_owned()))
+    }
+
+    fn motion_sensor_message(&self, sensor_data: &SensorData) -> Result<Option<String>, &'static str> {
+        if let Sensor::Motion { location, id } = self {
+            let occupancy_value = match sensor_data.get("occupancy") {
+                Some(serde_json::Value::Bool(bool_value)) => bool_value,
+                None => return Err("Cannot find occupancy value in motion sensor notification payload"),
+                _ => return Err("Unexpected value type for motion sensor notification's occupancy value")
+            };
+
+            if *occupancy_value {
+                match location {
+                    Some(location) =>
+                        Ok(Some(format!("Mouvement détecté dans {} (capteur #{})", location.to_lowercase(), id))),
+                    None =>
+                        Ok(Some(format!("Mouvement détecté par capteur #{}", id))),
+                }
+            } else {
+                Ok(None)
+            }
+        } else {
+            Err("motion_sensor_message called on something else than a motion sensor")
+        }
+    }
+
 }
 
-fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish) -> Result<Option<String>, &'static str> {
+async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, bot: &AutoSend<Bot>) -> Result<(), &'static str> {
 
     // println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
 
     let sensor_name = publish.topic.split('/').nth(1).ok_or("Failed to parse topic to get sensor name")?;
 
     let payload_string = String::from_utf8_lossy(&publish.payload).to_string();
-    let payload: HashMap<String, serde_json::Value> = serde_json::from_str(&payload_string).map_err(|_| "Failed to parse publish notification payload")?;
+    let sensor_data: SensorData = serde_json::from_str(&payload_string).map_err(|_| "Failed to parse publish notification payload")?;
 
-    process_sensor_notification(sensor_name, &payload)
+    // let sensor_name = get_sensor_name_from_mqtt_topic(&publish.topic).ok_or("Failed to parse topic to get sensor name");
+    let sensor = Sensor::identify(&sensor_name)?;
+
+    if let Some(sensor_message) = sensor.message(&sensor_data)? {
+        bot.send_message(MAISON_ESSERT_CHAT_ID, &sensor_message).await.unwrap();
+    }
+
+    Ok(())
 }
+
+// fn get_sensor_name_from_mqtt_topic(topic: &str) -> Result<String, &'static str> {
+//     Ok(topic.split('/').nth(1).ok_or("Failed to parse topic to get sensor name")?.to_string())
+// }
 
 #[tokio::main]
 async fn main() {
@@ -78,8 +111,6 @@ async fn main() {
     // log::info!("Starting throw dice bot...");
 
     let bot = Bot::from_env().auto_send();
-
-    let chat_id = ChatId(-688154163);
 
     let mut mqtt_options = MqttOptions::new("telegram-alarm-bot", "localhost", 1883);
     mqtt_options.set_keep_alive(Duration::from_secs(5));
@@ -89,13 +120,8 @@ async fn main() {
 
     while let Ok(notification) = event_loop.poll().await {
         if let Event::Incoming(Packet::Publish(publish)) = notification {
-            match process_zigbee2mqtt_publish_notification(publish) {
-                Ok(message) => {
-                    if message.is_some() {
-                        bot.send_message(chat_id, &message.unwrap()).await.unwrap();
-                    }
-                },
-                Err(error_str) => println!("Error processing zigbee2mqtt publish notification: {}", error_str)
+            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &bot).await {
+                println!("Error processing zigbee2mqtt publish notification: {}", error_str);
             }
         }
     }
