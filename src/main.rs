@@ -35,19 +35,27 @@ impl Sensor {
         }
     }
 
-    pub fn message(&self, sensor_data: &SensorData) -> Result<Option<String>, &'static str> {
+    pub fn message(&self, sensor_data: &SensorData, prev_sensor_data: &Option<&SensorData>) -> Result<Option<String>, &'static str> {
         match self {
-            Sensor::Contact => Self::contact_sensor_message(sensor_data),
-            Sensor::Motion { .. } => self.motion_sensor_message(sensor_data)
+            Sensor::Contact => Self::contact_sensor_message(sensor_data, prev_sensor_data),
+            Sensor::Motion { .. } => self.motion_sensor_message(sensor_data, prev_sensor_data)
         }
     }
 
-    fn contact_sensor_message(sensor_data: &SensorData) -> Result<Option<String>, &'static str> {
+    fn contact_sensor_message(sensor_data: &SensorData, prev_sensor_data: &Option<&SensorData>) -> Result<Option<String>, &'static str> {
 
         let contact_value = match sensor_data.get("contact") {
             Some(serde_json::Value::Bool(bool_value)) => bool_value,
             _ => return Err("Unexpected value type for contact")
         };
+
+        if let Some(prev_sensor_data) = prev_sensor_data {
+            if let Some(serde_json::Value::Bool(prev_contact_value)) = prev_sensor_data.get("contact") {
+                if contact_value == prev_contact_value {
+                    return Ok(None);
+                }
+            };
+        }
 
         let message = match contact_value {
             false => "La porte d'entrée vient d'être ouverte",
@@ -57,7 +65,7 @@ impl Sensor {
         Ok(Some(message.to_owned()))
     }
 
-    fn motion_sensor_message(&self, sensor_data: &SensorData) -> Result<Option<String>, &'static str> {
+    fn motion_sensor_message(&self, sensor_data: &SensorData, prev_sensor_data: &Option<&SensorData>) -> Result<Option<String>, &'static str> {
         if let Sensor::Motion { location, id } = self {
             let occupancy_value = match sensor_data.get("occupancy") {
                 Some(serde_json::Value::Bool(bool_value)) => bool_value,
@@ -66,12 +74,22 @@ impl Sensor {
             };
 
             if *occupancy_value {
+
+                if let Some(prev_sensor_data) = prev_sensor_data {
+                    if let Some(serde_json::Value::Bool(prev_occupancy_value)) = prev_sensor_data.get("occupancy") {
+                        if occupancy_value == prev_occupancy_value {
+                            return Ok(None);
+                        }
+                    };
+                }
+
                 match location {
                     Some(location) =>
                         Ok(Some(format!("Mouvement détecté dans {} (capteur #{})", location.to_lowercase(), id))),
                     None =>
                         Ok(Some(format!("Mouvement détecté par capteur #{}", id))),
                 }
+
             } else {
                 Ok(None)
             }
@@ -82,7 +100,7 @@ impl Sensor {
 
 }
 
-async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, bot: &AutoSend<Bot>) -> Result<(), &'static str> {
+async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, prev_sensors_data: &mut PrevSensorData, bot: &AutoSend<Bot>) -> Result<(), &'static str> {
 
     // println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
 
@@ -91,12 +109,16 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, bot
     let payload_string = String::from_utf8_lossy(&publish.payload).to_string();
     let sensor_data: SensorData = serde_json::from_str(&payload_string).map_err(|_| "Failed to parse publish notification payload")?;
 
+    let prev_sensor_data = prev_sensors_data.get(sensor_name);
+
     // let sensor_name = get_sensor_name_from_mqtt_topic(&publish.topic).ok_or("Failed to parse topic to get sensor name");
     let sensor = Sensor::identify(&sensor_name)?;
 
-    if let Some(sensor_message) = sensor.message(&sensor_data)? {
+    if let Some(sensor_message) = sensor.message(&sensor_data, &prev_sensor_data)? {
         bot.send_message(MAISON_ESSERT_CHAT_ID, &sensor_message).await.unwrap();
     }
+
+    prev_sensors_data.insert(sensor_name.to_string(), sensor_data);
 
     Ok(())
 }
@@ -105,10 +127,15 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, bot
 //     Ok(topic.split('/').nth(1).ok_or("Failed to parse topic to get sensor name")?.to_string())
 // }
 
+type SensorName = String;
+type PrevSensorData = HashMap<SensorName, SensorData>;
+
 #[tokio::main]
 async fn main() {
     // pretty_env_logger::init();
     // log::info!("Starting throw dice bot...");
+
+    let mut prev_sensors_data = PrevSensorData::new();
 
     let bot = Bot::from_env().auto_send();
 
@@ -120,7 +147,7 @@ async fn main() {
 
     while let Ok(notification) = event_loop.poll().await {
         if let Event::Incoming(Packet::Publish(publish)) = notification {
-            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &bot).await {
+            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, &bot).await {
                 println!("Error processing zigbee2mqtt publish notification: {}", error_str);
             }
         }
