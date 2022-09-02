@@ -146,8 +146,6 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, pre
     let sensor = Sensor::identify(&sensor_name)?;
 
     if let Some(sensor_message) = sensor.message(&sensor_data, &prev_sensor_data)? {
-        // bot.send_message(MAISON_ESSERT_CHAT_ID, &sensor_message).await.map_err(|_| "Failed to send message")?;
-        // notification_messages_storage.lock().unwrap().push_front(sensor_message.to_string());
         if let Err(_) = notification_tx.send(sensor_message).await {
             log::error!("Failed to send notification into channel");
         }
@@ -167,9 +165,9 @@ type PrevSensorData = HashMap<SensorName, SensorData>;
 
 fn handle_bot_incoming_messages(bot: AutoSend<Bot>, in_message_tx: mpsc::Sender<String>) -> impl Future<Output = ()> {
     repl_with_dep(bot, in_message_tx, |message: Message, _bot: AutoSend<Bot>, in_message_tx: mpsc::Sender<String>| async move {
+        // XXX check message is coming from somewhere we are expecting it to come from (Maison Essert chat for example)
         if let Some(message_text) = message.text() {
             println!("Got message with text: {:?}", message_text);
-            // incoming_messages_storage.lock().unwrap().push_front(message_text.to_string());
             if let Err(_) = in_message_tx.send(message_text.to_string()).await {
                 log::error!("Failed to send in message into channel");
             }
@@ -185,12 +183,6 @@ async fn bot_send_message(bot: AutoSend<Bot>, message: &String) {
 }
 
 async fn handle_bot_outgoing_messages(bot: AutoSend<Bot>, mut in_message_rx: mpsc::Receiver<String>, mut notification_rx: mpsc::Receiver<String>) {
-    // if let Some(notification_message) = notification_messages_storage.lock().unwrap().pop_back() {
-    //     if let Err(send_error) = bot.send_message(MAISON_ESSERT_CHAT_ID, &notification_message).await {
-    //         notification_messages_storage.lock().unwrap().push_back(notification_message);
-    //         log::error!("Failed to send notification message: {}", send_error);
-    //     }
-    // }
     if let Ok(in_message) = in_message_rx.try_recv() {
         bot_send_message(bot, &in_message).await;
     } else if let Ok(notification) = notification_rx.try_recv() {
@@ -202,8 +194,6 @@ async fn handle_bot_outgoing_messages(bot: AutoSend<Bot>, mut in_message_rx: mps
 async fn main() {
     pretty_env_logger::formatted_builder().parse_filters("info").init();
 
-    // let incoming_messages_storage: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
-    // let notification_messages_storage: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
     let (in_message_tx, in_message_rx) = mpsc::channel(100);
     let (notification_tx, notification_rx) = mpsc::channel(100);
     let mut prev_sensors_data = PrevSensorData::new();
@@ -218,14 +208,6 @@ async fn main() {
 
     log::info!("Started Telegram alarm bot");
 
-    // while let Ok(notification) = event_loop.poll().await {
-    //     if let Event::Incoming(Packet::Publish(publish)) = notification {
-    //         if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, &bot).await {
-    //             println!("Error processing zigbee2mqtt publish notification: {}", error_str);
-    //         }
-    //     }
-    // }
-
     tokio::spawn(handle_bot_incoming_messages(bot.clone(), in_message_tx));
     tokio::spawn(handle_bot_outgoing_messages(bot.clone(), in_message_rx, notification_rx));
 
@@ -236,8 +218,6 @@ async fn main() {
                 println!("Error processing zigbee2mqtt publish notification: {}", error_str);
             }
         },
-
-        // () = handle_bot_incoming_messages(bot.clone(), message_storage.clone()) => {}
 
     }
 
