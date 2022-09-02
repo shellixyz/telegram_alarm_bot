@@ -11,7 +11,8 @@ use std::future::Future;
 
 type SensorData = HashMap<String, serde_json::Value>;
 
-const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(-688154163);
+//const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(-688154163);
+const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(554088050);
 
 enum Sensor {
     Contact,
@@ -211,14 +212,11 @@ async fn main() {
     tokio::spawn(handle_bot_incoming_messages(bot.clone(), in_message_tx));
     tokio::spawn(handle_bot_outgoing_messages(bot.clone(), in_message_rx, notification_rx));
 
-    tokio::select! {
-
-        Ok(Event::Incoming(Packet::Publish(publish))) = event_loop.poll() => {
-            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, notification_tx).await {
+    loop {
+        if let Ok(Event::Incoming(Packet::Publish(publish))) = event_loop.poll().await {
+            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, notification_tx.clone()).await {
                 println!("Error processing zigbee2mqtt publish notification: {}", error_str);
             }
-        },
-
+        }
     }
-
 }
