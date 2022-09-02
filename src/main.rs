@@ -1,9 +1,12 @@
 use lazy_static::lazy_static;
-use teloxide::prelude::*;
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 use regex::Regex;
+use std::sync::{Mutex, Arc};
+use teloxide::{prelude::*, dispatching};
+use std::future::Future;
+
 
 type SensorData = HashMap<String, serde_json::Value>;
 
@@ -100,7 +103,34 @@ impl Sensor {
 
 }
 
-async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, prev_sensors_data: &mut PrevSensorData, bot: &AutoSend<Bot>) -> Result<(), &'static str> {
+pub async fn repl_with_dep<'a, R, H, E, X, Args>(bot: R, dep: X, handler: H)
+where
+    H: dptree::di::Injectable<DependencyMap, Result<(), E>, Args> + Send + Sync + 'static,
+    Result<(), E>: OnError<E>,
+    E: std::fmt::Debug + Send + Sync + 'static,
+    R: Requester + Send + Sync + Clone + 'static,
+    <R as Requester>::GetUpdates: Send,
+    X: Send + Sync + 'static
+{
+    let listener = dispatching::update_listeners::polling_default(bot.clone()).await;
+
+    // Other update types are of no interest to use since this REPL is only for
+    // messages. See <https://github.com/teloxide/teloxide/issues/557>.
+    let ignore_update = |_upd| Box::pin(async {});
+
+    Dispatcher::builder(bot, Update::filter_message().chain(dptree::endpoint(handler)))
+        .dependencies(dptree::deps![dep])
+        .default_handler(ignore_update)
+        .enable_ctrlc_handler()
+        .build()
+        .dispatch_with_listener(
+            listener,
+            LoggingErrorHandler::with_custom_text("An error from the update listener"),
+        )
+        .await;
+}
+
+async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, prev_sensors_data: &mut PrevSensorData, notification_messages_storage: Arc<Mutex<VecDeque<String>>>) -> Result<(), &'static str> {
 
     // println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
 
@@ -115,7 +145,8 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, pre
     let sensor = Sensor::identify(&sensor_name)?;
 
     if let Some(sensor_message) = sensor.message(&sensor_data, &prev_sensor_data)? {
-        bot.send_message(MAISON_ESSERT_CHAT_ID, &sensor_message).await.unwrap();
+        // bot.send_message(MAISON_ESSERT_CHAT_ID, &sensor_message).await.map_err(|_| "Failed to send message")?;
+        notification_messages_storage.lock().unwrap().push_front(sensor_message.to_string());
     }
 
     prev_sensors_data.insert(sensor_name.to_string(), sensor_data);
@@ -130,11 +161,31 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, pre
 type SensorName = String;
 type PrevSensorData = HashMap<SensorName, SensorData>;
 
+fn handle_bot_incoming_messages(bot: AutoSend<Bot>, incoming_messages_storage: Arc<Mutex<VecDeque<String>>>) -> impl Future<Output = ()> {
+    repl_with_dep(bot, incoming_messages_storage, |message: Message, _bot: AutoSend<Bot>, incoming_messages_storage: Arc<Mutex<VecDeque<String>>>| async move {
+        if let Some(message_text) = message.text() {
+            println!("Got message with text: {:?}", message_text);
+            incoming_messages_storage.lock().unwrap().push_front(message_text.to_string());
+        }
+        respond(())
+    })
+}
+
+async fn handle_bot_outgoing_messages(bot: AutoSend<Bot>, incoming_messages_storage: Arc<Mutex<VecDeque<String>>>, notification_messages_storage: Arc<Mutex<VecDeque<String>>>) {
+    if let Some(notification_message) = notification_messages_storage.lock().unwrap().pop_back() {
+        if let Err(send_error) = bot.send_message(MAISON_ESSERT_CHAT_ID, &notification_message).await {
+            notification_messages_storage.lock().unwrap().push_back(notification_message);
+            log::error!("Failed to send notification message: {}", send_error);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    // pretty_env_logger::init();
-    // log::info!("Starting throw dice bot...");
+    pretty_env_logger::formatted_builder().parse_filters("info").init();
 
+    let incoming_messages_storage: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let notification_messages_storage: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
     let mut prev_sensors_data = PrevSensorData::new();
 
     let bot = Bot::from_env().auto_send();
@@ -145,12 +196,29 @@ async fn main() {
     let (client, mut event_loop) = AsyncClient::new(mqtt_options, 10);
     client.subscribe("zigbee2mqtt/+", QoS::AtMostOnce).await.unwrap();
 
-    while let Ok(notification) = event_loop.poll().await {
-        if let Event::Incoming(Packet::Publish(publish)) = notification {
-            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, &bot).await {
+    log::info!("Started Telegram alarm bot");
+
+    // while let Ok(notification) = event_loop.poll().await {
+    //     if let Event::Incoming(Packet::Publish(publish)) = notification {
+    //         if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, &bot).await {
+    //             println!("Error processing zigbee2mqtt publish notification: {}", error_str);
+    //         }
+    //     }
+    // }
+
+    tokio::spawn(handle_bot_incoming_messages(bot.clone(), incoming_messages_storage.clone()));
+    tokio::spawn(handle_bot_outgoing_messages(bot.clone(), incoming_messages_storage.clone(), notification_messages_storage.clone()));
+
+    tokio::select! {
+
+        Ok(Event::Incoming(Packet::Publish(publish))) = event_loop.poll() => {
+            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, notification_messages_storage.clone()).await {
                 println!("Error processing zigbee2mqtt publish notification: {}", error_str);
             }
-        }
+        },
+
+        // () = handle_bot_incoming_messages(bot.clone(), message_storage.clone()) => {}
+
     }
 
 }
