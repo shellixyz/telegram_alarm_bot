@@ -134,7 +134,7 @@ where
 
 async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, prev_sensors_data: &mut PrevSensorData, notification_tx: mpsc::Sender<String>) -> Result<(), &'static str> {
 
-    // println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
+    println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
 
     let sensor_name = publish.topic.split('/').nth(1).ok_or("Failed to parse topic to get sensor name")?;
 
@@ -177,17 +177,18 @@ fn handle_bot_incoming_messages(bot: AutoSend<Bot>, in_message_tx: mpsc::Sender<
     })
 }
 
-async fn bot_send_message(bot: AutoSend<Bot>, message: &String) {
+async fn bot_send_message(bot: &AutoSend<Bot>, message: &String) {
     if let Err(send_error) = bot.send_message(MAISON_ESSERT_CHAT_ID, message).await {
         log::error!("Failed to send notification message: {}", send_error);
     }
 }
 
 async fn handle_bot_outgoing_messages(bot: AutoSend<Bot>, mut in_message_rx: mpsc::Receiver<String>, mut notification_rx: mpsc::Receiver<String>) {
-    if let Ok(in_message) = in_message_rx.try_recv() {
-        bot_send_message(bot, &in_message).await;
-    } else if let Ok(notification) = notification_rx.try_recv() {
-        bot_send_message(bot, &notification).await;
+    loop {
+        tokio::select! {
+            Some(in_message) = in_message_rx.recv() => bot_send_message(&bot, &in_message).await,
+            Some(notification) = notification_rx.recv() => bot_send_message(&bot, &notification).await
+        }
     }
 }
 
@@ -213,10 +214,14 @@ async fn main() {
     tokio::spawn(handle_bot_outgoing_messages(bot.clone(), in_message_rx, notification_rx));
 
     loop {
-        if let Ok(Event::Incoming(Packet::Publish(publish))) = event_loop.poll().await {
-            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, notification_tx.clone()).await {
-                println!("Error processing zigbee2mqtt publish notification: {}", error_str);
-            }
+        match event_loop.poll().await {
+            Ok(Event::Incoming(Packet::Publish(publish))) => {
+                if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, notification_tx.clone()).await {
+                    println!("Error processing zigbee2mqtt publish notification: {}", error_str);
+                }
+            },
+            Err(mqtt_connection_error) => log::error!("mqtt connection error: {}", mqtt_connection_error),
+            _ => {}
         }
     }
 }
