@@ -200,19 +200,26 @@ async fn bot_send_message(bot: &AutoSend<Bot>, message: &str) {
     }
 }
 
+// impl std::fmt::Display for time::Duration {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         let seconds = self.as_secs() % 60
+//     }
+// }
+
+use compound_duration::format_dhms;
+
 async fn reply_to_command(bot: &AutoSend<Bot>, command: &str, prev_sensors_data: &Arc<Mutex<PrevSensorHM>>) {
     let locked_prev_sensors_data = prev_sensors_data.lock().await;
     match command {
         "/battery" => {
-            // for (sensor_name, prev_sensor_data) in locked_prev_sensors_data.iter() {
-            // }
             let battery_info = locked_prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
                 let data = &prev_sensor_data.data;
                 let battery_str = match data.get("battery") {
                     Some(serde_json::Value::Number(battery_value)) => format!("{}%", battery_value),
                     _ => "unknown".to_owned(),
                 };
-                format!("{}: {} (last seen: {:?})", sensor_name, battery_str, &prev_sensor_data.timestamp)
+                let elapsed_since_last_seen = prev_sensor_data.timestamp.elapsed();
+                format!("{}: {} (last seen {} ago)", sensor_name, battery_str, format_dhms(elapsed_since_last_seen.as_secs()))
             }).collect::<Vec<String>>().join("\n");
             bot_send_message(&bot, &battery_info).await
         },
