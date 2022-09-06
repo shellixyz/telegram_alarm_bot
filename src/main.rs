@@ -1,12 +1,13 @@
 use lazy_static::lazy_static;
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use std::time::Duration;
 use regex::Regex;
 // use std::sync::{Mutex, Arc};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use teloxide::{prelude::*, dispatching};
 use std::future::Future;
+use std::time;
 
 
 type SensorData = HashMap<String, serde_json::Value>;
@@ -40,10 +41,10 @@ impl Sensor {
         }
     }
 
-    pub fn message(&self, sensor_data: &SensorData, prev_sensor_data: &Option<&SensorData>) -> Result<Option<String>, &'static str> {
+    pub fn message(&self, sensor_data: &SensorData, prev_sensor_data: Option<&SensorData>) -> Result<Option<String>, &'static str> {
         match self {
-            Sensor::Contact => Self::contact_sensor_message(sensor_data, prev_sensor_data),
-            Sensor::Motion { .. } => self.motion_sensor_message(sensor_data, prev_sensor_data)
+            Sensor::Contact => Self::contact_sensor_message(sensor_data, &prev_sensor_data),
+            Sensor::Motion { .. } => self.motion_sensor_message(sensor_data, &prev_sensor_data)
         }
     }
 
@@ -132,7 +133,7 @@ where
         .await;
 }
 
-async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, prev_sensors_data: &mut PrevSensorData, notification_tx: mpsc::Sender<String>) -> Result<(), &'static str> {
+async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, prev_sensors_data: &Arc<Mutex<PrevSensorHM>>, notification_tx: mpsc::Sender<String>) -> Result<(), &'static str> {
 
     println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
 
@@ -141,18 +142,19 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, pre
     let payload_string = String::from_utf8_lossy(&publish.payload).to_string();
     let sensor_data: SensorData = serde_json::from_str(&payload_string).map_err(|_| "Failed to parse publish notification payload")?;
 
-    let prev_sensor_data = prev_sensors_data.get(sensor_name);
+    let mut locked_prev_sensors_data = prev_sensors_data.lock().await;
+    let prev_sensor_data = locked_prev_sensors_data.get(sensor_name);
 
     // let sensor_name = get_sensor_name_from_mqtt_topic(&publish.topic).ok_or("Failed to parse topic to get sensor name");
     let sensor = Sensor::identify(&sensor_name)?;
 
-    if let Some(sensor_message) = sensor.message(&sensor_data, &prev_sensor_data)? {
+    if let Some(sensor_message) = sensor.message(&sensor_data, prev_sensor_data.map(|psd| &psd.data))? {
         if let Err(_) = notification_tx.send(sensor_message).await {
             log::error!("Failed to send notification into channel");
         }
     }
 
-    prev_sensors_data.insert(sensor_name.to_string(), sensor_data);
+    locked_prev_sensors_data.insert(sensor_name.to_string(), PrevSensorData::new(sensor_data));
 
     Ok(())
 }
@@ -162,7 +164,22 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, pre
 // }
 
 type SensorName = String;
-type PrevSensorData = HashMap<SensorName, SensorData>;
+type PrevSensorHM = HashMap<SensorName, PrevSensorData>;
+
+struct PrevSensorData {
+    timestamp: time::Instant,
+    data: SensorData
+}
+
+impl PrevSensorData {
+    fn new(sensor_data: SensorData) -> Self {
+        Self {
+            timestamp: time::Instant::now(),
+            data: sensor_data
+        }
+    }
+}
+
 
 fn handle_bot_incoming_messages(bot: AutoSend<Bot>, in_message_tx: mpsc::Sender<String>) -> impl Future<Output = ()> {
     repl_with_dep(bot, in_message_tx, |message: Message, _bot: AutoSend<Bot>, in_message_tx: mpsc::Sender<String>| async move {
@@ -177,16 +194,39 @@ fn handle_bot_incoming_messages(bot: AutoSend<Bot>, in_message_tx: mpsc::Sender<
     })
 }
 
-async fn bot_send_message(bot: &AutoSend<Bot>, message: &String) {
+async fn bot_send_message(bot: &AutoSend<Bot>, message: &str) {
     if let Err(send_error) = bot.send_message(MAISON_ESSERT_CHAT_ID, message).await {
         log::error!("Failed to send notification message: {}", send_error);
     }
 }
 
-async fn handle_bot_outgoing_messages(bot: AutoSend<Bot>, mut in_message_rx: mpsc::Receiver<String>, mut notification_rx: mpsc::Receiver<String>) {
+async fn reply_to_command(bot: &AutoSend<Bot>, command: &str, prev_sensors_data: &Arc<Mutex<PrevSensorHM>>) {
+    let locked_prev_sensors_data = prev_sensors_data.lock().await;
+    match command {
+        "/battery" => {
+            // for (sensor_name, prev_sensor_data) in locked_prev_sensors_data.iter() {
+            // }
+            let battery_info = locked_prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
+                let data = &prev_sensor_data.data;
+                let battery_str = match data.get("battery") {
+                    Some(serde_json::Value::Number(battery_value)) => format!("{}%", battery_value),
+                    _ => "unknown".to_owned(),
+                };
+                format!("{}: {} (last seen: {:?})", sensor_name, battery_str, &prev_sensor_data.timestamp)
+            }).collect::<Vec<String>>().join("\n");
+            bot_send_message(&bot, &battery_info).await
+        },
+        _ => {}
+    }
+
+}
+
+async fn handle_bot_outgoing_messages(bot: AutoSend<Bot>, mut in_message_rx: mpsc::Receiver<String>, mut notification_rx: mpsc::Receiver<String>, prev_sensors_data: Arc<Mutex<PrevSensorHM>>) {
     loop {
         tokio::select! {
-            Some(in_message) = in_message_rx.recv() => bot_send_message(&bot, &in_message).await,
+            Some(in_message) = in_message_rx.recv() => {
+                reply_to_command(&bot, &in_message, &prev_sensors_data).await;
+            },
             Some(notification) = notification_rx.recv() => bot_send_message(&bot, &notification).await
         }
     }
@@ -198,7 +238,8 @@ async fn main() {
 
     let (in_message_tx, in_message_rx) = mpsc::channel(100);
     let (notification_tx, notification_rx) = mpsc::channel(100);
-    let mut prev_sensors_data = PrevSensorData::new();
+    let prev_sensors_data = Arc::new(Mutex::new(PrevSensorHM::new()));
+    // let mut alarm_enabled = false;
 
     let bot = Bot::from_env().auto_send();
 
@@ -211,12 +252,12 @@ async fn main() {
     log::info!("Started Telegram alarm bot");
 
     tokio::spawn(handle_bot_incoming_messages(bot.clone(), in_message_tx));
-    tokio::spawn(handle_bot_outgoing_messages(bot.clone(), in_message_rx, notification_rx));
+    tokio::spawn(handle_bot_outgoing_messages(bot.clone(), in_message_rx, notification_rx, prev_sensors_data.clone()));
 
     loop {
         match event_loop.poll().await {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
-                if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &mut prev_sensors_data, notification_tx.clone()).await {
+                if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &prev_sensors_data, notification_tx.clone()).await {
                     println!("Error processing zigbee2mqtt publish notification: {}", error_str);
                 }
             },
