@@ -56,7 +56,6 @@ where
     Dispatcher::builder(bot, Update::filter_message().chain(dptree::endpoint(handler)))
         .dependencies(dptree::deps![dep1, dep2])
         .default_handler(ignore_update)
-        .enable_ctrlc_handler()
         .build()
         .dispatch_with_listener(
             listener,
