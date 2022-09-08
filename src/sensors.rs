@@ -50,7 +50,7 @@ pub struct PrevSensorsData(HashMap<Name, PrevData>);
 
 impl PrevSensorsData {
 
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self(HashMap::new())
     }
 

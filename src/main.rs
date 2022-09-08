@@ -1,8 +1,8 @@
 use telegram_alarm_bot::SharedState;
 
-mod telegram;
-mod mqtt;
-mod sensors;
+pub mod telegram;
+pub mod mqtt;
+pub mod sensors;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use telegram_alarm_bot::ProtectedSharedState;
