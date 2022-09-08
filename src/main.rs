@@ -13,7 +13,7 @@ async fn main() {
 
     let shared_state = Arc::new(Mutex::new(SharedState::new()));
 
-    let (telegram_repl_join_handle, shared_bot) = telegram::start_repl(shared_state.clone()).await;
+    let shared_bot = telegram::start_repl(shared_state.clone()).await;
 
     mqtt::listen(shared_bot, shared_state).await;
 }

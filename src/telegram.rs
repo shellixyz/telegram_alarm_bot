@@ -4,7 +4,7 @@ const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(554088050);
 
 use teloxide::{prelude::*, dispatching};
 use std::sync::Arc;
-use tokio::{sync::Mutex, task::JoinHandle};
+use tokio::sync::Mutex;
 use Sync;
 use compound_duration::format_dhms;
 
@@ -12,14 +12,14 @@ use crate::ProtectedSharedState;
 
 pub type SharedBot = Arc<Mutex<AutoSend<Bot>>>;
 
-pub async fn start_repl(shared_state: ProtectedSharedState) -> (JoinHandle<()>, SharedBot) {
+pub async fn start_repl(shared_state: ProtectedSharedState) -> SharedBot {
 
     let bot = Bot::from_env().auto_send();
     let shared_bot = Arc::new(Mutex::new(bot.clone()));
     let repl_shared_bot = shared_bot.clone();
 
     // tokio::spawn(async move {
-    let join_handle = tokio::spawn(
+    tokio::spawn(
         repl_with_deps(bot, repl_shared_bot, shared_state, |message: Message, _bot: AutoSend<Bot>, shared_bot: SharedBot, shared_state: ProtectedSharedState| async move {
             // XXX check message is coming from somewhere we are expecting it to come from (Maison Essert chat for example)
             if let Some(command) = message.text() {
@@ -34,7 +34,7 @@ pub async fn start_repl(shared_state: ProtectedSharedState) -> (JoinHandle<()>, 
         }));
     // });
 
-    (join_handle, shared_bot)
+    shared_bot
 }
 
 async fn repl_with_deps<'a, R, H, E, D1, D2, Args>(bot: R, dep1: D1, dep2: D2, handler: H)
