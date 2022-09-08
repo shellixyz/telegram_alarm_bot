@@ -18,21 +18,18 @@ pub async fn start_repl(shared_state: ProtectedSharedState) -> SharedBot {
     let shared_bot = Arc::new(Mutex::new(bot.clone()));
     let repl_shared_bot = shared_bot.clone();
 
-    // tokio::spawn(async move {
     tokio::spawn(
         repl_with_deps(bot, repl_shared_bot, shared_state, |message: Message, _bot: AutoSend<Bot>, shared_bot: SharedBot, shared_state: ProtectedSharedState| async move {
-            // XXX check message is coming from somewhere we are expecting it to come from (Maison Essert chat for example)
-            if let Some(command) = message.text() {
-                println!("Got message with text: {:?}", command);
-                let locked_bot = shared_bot.lock().await;
-                handle_commands(&locked_bot, command, &shared_state).await;
-                // if let Err(_) = in_message_tx.send(message_text.to_string()).await {
-                //     log::error!("Failed to send in message into channel");
-                // }
+            if message.chat.id == MAISON_ESSERT_CHAT_ID {
+                if let Some(command) = message.text() {
+                    println!("Got message with text: {:?}", command);
+                    let locked_bot = shared_bot.lock().await;
+                    handle_commands(&locked_bot, command, &shared_state).await;
+                }
             }
             respond(())
-        }));
-    // });
+        })
+    );
 
     shared_bot
 }

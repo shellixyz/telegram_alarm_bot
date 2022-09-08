@@ -1,7 +1,6 @@
 
 pub mod telegram;
 pub mod sensors;
-// pub mod mqtt;
 
 use std::sync::Arc;
 use sensors::PrevSensorsData;

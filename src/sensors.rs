@@ -21,30 +21,6 @@ impl PrevData {
 }
 
 type Name = String;
-// pub type PrevSensorsData = HashMap<Name, PrevData>;
-
-// pub struct PrevSensorsData<S>(HashMap<S, PrevData>)
-// where
-//     S: Into<String> + Hash + Eq,
-//     String: std::borrow::Borrow<S>;
-
-// impl<S> PrevSensorsData<S>
-// where
-// S: Into<String> + Hash + Eq,
-// String: std::borrow::Borrow<S>
-// {
-//     pub fn new() -> Self {
-//         Self(HashMap::new())
-//     }
-
-//     pub fn get(&self, sensor_name: &S) -> Option<&PrevData> {
-//         self.0.get(sensor_name)
-//     }
-
-//     pub fn insert(&mut self, sensor_name: &S, sensor_data: Data) {
-//         self.0.insert(sensor_name, PrevData::new(sensor_data));
-//     }
-// }
 
 pub struct PrevSensorsData(HashMap<Name, PrevData>);
 
