@@ -1,0 +1,3 @@
+- send PM to me when the bot is started (to catch restarts due to panics)
+- json configuration file
+- add /help command
