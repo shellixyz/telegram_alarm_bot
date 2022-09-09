@@ -6,7 +6,6 @@ use teloxide::{prelude::*, dispatching};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use Sync;
-use compound_duration::format_dhms;
 
 use crate::ProtectedSharedState;
 
@@ -79,13 +78,7 @@ async fn handle_commands(bot: &AutoSend<Bot>, command: &str, shared_data: &Prote
 
         "/battery" => {
             let battery_info = locked_shared_data.prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
-                let data = &prev_sensor_data.data;
-                let battery_str = match data.get("battery") {
-                    Some(serde_json::Value::Number(battery_value)) => format!("{}%", battery_value),
-                    _ => "unknown".to_owned(),
-                };
-                let elapsed_since_last_seen = prev_sensor_data.timestamp.elapsed();
-                format!("{}: {} (last seen {} ago)", sensor_name, battery_str, format_dhms(elapsed_since_last_seen.as_secs()))
+                format!("{}: {} / {} ({})", sensor_name, prev_sensor_data.common.battery_value_str(), prev_sensor_data.common.voltage_value_str(), prev_sensor_data.common.time_max_since_last_update_str())
             }).collect::<Vec<String>>().join("\n");
             let message = if battery_info.is_empty() { "No data" } else { battery_info.as_str() };
             send_message(bot, message).await
