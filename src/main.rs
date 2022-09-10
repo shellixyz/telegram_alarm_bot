@@ -1,4 +1,4 @@
-use telegram_alarm_bot::{SharedState, sensors::PrevSensorsData};
+use telegram_alarm_bot::{SharedState, sensors::PrevSensorsData, telegram::SharedBot};
 
 pub mod telegram;
 pub mod mqtt;
@@ -18,6 +18,11 @@ async fn terminate(source: &str, shared_state: Arc<Mutex<SharedState>>) -> ! {
     }
 
     std::process::exit(0);
+}
+
+async fn notify_start(shared_bot: &SharedBot) {
+    let locked_bot = shared_bot.lock().await;
+    telegram::shared_bot_send_message(&locked_bot, "Started").await;
 }
 
 #[tokio::main]
@@ -42,6 +47,8 @@ async fn main() {
     let shared_bot = telegram::start_repl(shared_state.clone()).await;
 
     let mut mqtt_event_loop = mqtt::init().await;
+
+    notify_start(&shared_bot).await;
 
     loop {
         tokio::select! {
