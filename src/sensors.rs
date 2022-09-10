@@ -3,6 +3,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use compound_duration::format_dhms;
+use serde::{Serialize,Deserialize};
+
+const SENSORS_DATA_PATH: &str = "sensors_data.json";
 
 pub type Data = HashMap<String, serde_json::Value>;
 
@@ -10,6 +13,7 @@ trait TimeSinceLastUpdate {
     fn time_since_last_update(&self) -> chrono::Duration;
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct CommonBatteryState {
     pub(self) update_timestamp: chrono::DateTime<chrono::Local>,
     value: u8
@@ -30,6 +34,7 @@ impl TimeSinceLastUpdate for CommonBatteryState {
     }
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct CommonVoltageState {
     update_timestamp: chrono::DateTime<chrono::Local>,
     value: f32
@@ -50,6 +55,7 @@ impl TimeSinceLastUpdate for CommonVoltageState {
     }
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct CommonState {
     battery: Option<CommonBatteryState>,
     voltage: Option<CommonVoltageState>
@@ -110,11 +116,13 @@ impl CommonState {
 
 }
 
+#[derive(Serialize,Deserialize)]
 pub enum SpecificStateValue {
     Contact { contact: bool },
     Motion { occupancy: bool }
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct SpecificState {
     update_timestamp: chrono::DateTime<chrono::Local>,
     pub value: SpecificStateValue
@@ -133,8 +141,12 @@ impl SpecificState {
     }
 }
 
+#[derive(Serialize,Deserialize)]
 pub struct PrevData {
+    #[serde(flatten)]
     pub common: CommonState,
+
+    #[serde(skip)]
     pub specific: Option<SpecificState>
 }
 
@@ -149,6 +161,7 @@ impl PrevData {
 
 type Name = String;
 
+#[derive(Serialize,Deserialize)]
 pub struct PrevSensorsData(HashMap<Name, PrevData>);
 
 impl PrevSensorsData {
@@ -168,6 +181,53 @@ impl PrevSensorsData {
     pub fn iter(&self) -> std::collections::hash_map::Iter<String, PrevData> {
         self.0.iter()
     }
+
+    pub fn save_to_file(&self) -> Result<(), String> {
+        match serde_json::to_string_pretty(self) {
+            Ok(prev_sensors_data_json) => if let Err(error) = std::fs::write(SENSORS_DATA_PATH, prev_sensors_data_json) {
+                Err(format!("sensors file write error: {}", error))
+            } else {
+                Ok(())
+            },
+            Err(error) => {
+                Err(format!("error serializing sensors data: {}", error))
+            }
+        }
+    }
+
+    pub fn load_from_file() -> Result<Self, String> {
+        // let mut json_buffer = String::new();
+
+        // match std::fs::read_to_string(SENSORS_DATA_PATH) {
+        //     Ok(prev_sensors_data_json) => match serde_json::from_str(s),
+        //     Err(error) => todo!(),
+        // }
+
+        // let mut file = match std::fs::File::open(SENSORS_DATA_PATH) {
+        //     Ok(file) => file,
+        //     Err(open_error) => {
+        //         return Err(format!("open error: {}: {}", SENSORS_DATA_PATH, open_error));
+        //     },
+        // };
+
+        let file = std::fs::File::open(SENSORS_DATA_PATH).map_err(|open_error| format!("open error: {}: {}", SENSORS_DATA_PATH, open_error))?;
+        let reader = std::io::BufReader::new(file);
+        serde_json::from_reader(reader).map_err(|deser_err| format!("error deserializing sensors data: {}", deser_err))
+
+        // match serde_json::from_reader(reader) {
+        //     Ok(deserialized) => Ok(deserialized),
+        //     Err(deserialization_error) => Err(format!("error deserializing sensors data: {}", deserialization_error))
+        // }
+
+        // let mut file_content = String::new();
+        // file.read_to_string(&mut file_content).ok();
+
+        // match serde_json::from_str(&file_content) {
+        //     Ok(deserialized) => Ok(deserialized),
+        //     Err(deserialization_error) => Err(format!("error deserializing sensors data: {}", deserialization_error))
+        // }
+    }
+
 }
 
 pub enum Sensor {

@@ -1,27 +1,29 @@
 
-use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet};
+use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet, EventLoop};
 
 use crate::sensors;
 use crate::{ProtectedSharedState, telegram::{SharedBot, self}};
 
-pub async fn listen(shared_bot: SharedBot, shared_state: ProtectedSharedState) {
-
+pub async fn init() -> EventLoop {
     let mut mqtt_options = MqttOptions::new("telegram-alarm-bot", "localhost", 1883);
     mqtt_options.set_keep_alive(std::time::Duration::from_secs(5));
 
-    let (client, mut event_loop) = AsyncClient::new(mqtt_options, 10);
+    let (client, event_loop) = AsyncClient::new(mqtt_options, 10);
     client.subscribe("zigbee2mqtt/+", QoS::AtMostOnce).await.unwrap();
 
-    loop {
-        match event_loop.poll().await {
-            Ok(Event::Incoming(Packet::Publish(publish))) => {
-                if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &shared_bot, &shared_state).await {
-                    println!("Error processing zigbee2mqtt publish notification: {}", error_str);
-                }
-            },
-            Err(mqtt_connection_error) => log::error!("mqtt connection error: {}", mqtt_connection_error),
-            _ => {}
-        }
+    event_loop
+}
+
+pub async fn handle_events(event_loop: &mut EventLoop, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) {
+
+    match event_loop.poll().await {
+        Ok(Event::Incoming(Packet::Publish(publish))) => {
+            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &shared_bot, &shared_state).await {
+                println!("Error processing zigbee2mqtt publish notification: {}", error_str);
+            }
+        },
+        Err(mqtt_connection_error) => log::error!("mqtt connection error: {}", mqtt_connection_error),
+        _ => {}
     }
 
 }

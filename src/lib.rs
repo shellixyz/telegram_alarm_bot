@@ -18,6 +18,10 @@ impl SharedState {
             notifications_enabled: false
         }
     }
+
+    pub fn save_to_file() {
+
+    }
 }
 
 pub type ProtectedSharedState = Arc<Mutex<SharedState>>;
