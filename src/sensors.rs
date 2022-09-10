@@ -83,6 +83,16 @@ impl CommonState {
         });
     }
 
+    pub fn time_min_since_last_update(&self) -> Option<chrono::Duration> {
+        match (&self.battery, &self.voltage) {
+            (None, None) => None,
+            (None, Some(voltage)) => Some(voltage.time_since_last_update()),
+            (Some(battery), None) => Some(battery.time_since_last_update()),
+            (Some(battery), Some(voltage)) =>
+                Some(std::cmp::min(battery.time_since_last_update(), voltage.time_since_last_update())),
+        }
+    }
+
     pub fn time_max_since_last_update(&self) -> Option<chrono::Duration> {
         match (&self.battery, &self.voltage) {
             (None, None) => None,
@@ -157,6 +167,27 @@ impl PrevData {
             specific: sensor_value.map(|specific_state_value| SpecificState::new(specific_state_value))
         }
     }
+
+    pub fn time_since_last_seen(&self) -> Option<chrono::Duration> {
+        let common_time_since_last_update = self.common.time_min_since_last_update();
+        let specific_time_since_last_update = self.specific.as_ref().map(|specific| chrono::Local::now().signed_duration_since(specific.update_timestamp));
+
+        match (common_time_since_last_update, specific_time_since_last_update) {
+            (None, None) => None,
+            (None, Some(specific)) => Some(specific),
+            (Some(common), None) => Some(common),
+            (Some(common), Some(specific)) => Some(std::cmp::min(common, specific)),
+        }
+
+    }
+
+    pub fn time_since_last_seen_str(&self) -> String {
+        match self.time_since_last_seen() {
+            Some(duration) => format!("last seen {} ago", format_dhms(std::cmp::max(0, duration.num_seconds()))),
+            None => "no data".to_owned(),
+        }
+    }
+
 }
 
 type Name = String;

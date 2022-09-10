@@ -61,7 +61,11 @@ where
 }
 
 pub async fn send_message(bot: &AutoSend<Bot>, message: &str) {
-    if let Err(send_error) = bot.send_message(MAISON_ESSERT_CHAT_ID, message).await {
+    // let message = message.to_string().replace('(', ')')
+    let send_message = bot
+        .send_message(MAISON_ESSERT_CHAT_ID, message)
+        .parse_mode(teloxide::types::ParseMode::Html);
+    if let Err(send_error) = send_message.await {
         log::error!("Failed to send notification message: {}", send_error);
     }
 }
@@ -78,7 +82,7 @@ async fn handle_commands(bot: &AutoSend<Bot>, command: &str, shared_data: &Prote
 
         "/battery" => {
             let battery_info = locked_shared_data.prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
-                format!("{}: {} / {} ({})", sensor_name, prev_sensor_data.common.battery_value_str(), prev_sensor_data.common.voltage_value_str(), prev_sensor_data.common.time_max_since_last_update_str())
+                format!("• <b>{}</b>: {} / {} ({})", sensor_name, prev_sensor_data.common.battery_value_str(), prev_sensor_data.common.voltage_value_str(), prev_sensor_data.common.time_max_since_last_update_str())
             }).collect::<Vec<String>>().join("\n");
             let message = if battery_info.is_empty() { "No data" } else { battery_info.as_str() };
             send_message(bot, message).await
@@ -95,11 +99,15 @@ async fn handle_commands(bot: &AutoSend<Bot>, command: &str, shared_data: &Prote
         },
 
         "/status" => {
+            let sensor_info_str = locked_shared_data.prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
+                format!("• <b>{}</b>: {}", sensor_name, prev_sensor_data.time_since_last_seen_str())
+            }).collect::<Vec<String>>().join("\n");
+
             let notifications_status_str = match locked_shared_data.notifications_enabled {
                 true => "enabled",
                 false => "disabled",
             };
-            send_message(bot, format!("Notifications are {}", notifications_status_str).as_str()).await;
+            send_message(bot, format!("Sensors:\n{}\n\nNotifications are {}", sensor_info_str, notifications_status_str).as_str()).await;
         },
 
         "/help" => {
