@@ -227,36 +227,9 @@ impl PrevSensorsData {
     }
 
     pub fn load_from_file() -> Result<Self, String> {
-        // let mut json_buffer = String::new();
-
-        // match std::fs::read_to_string(SENSORS_DATA_PATH) {
-        //     Ok(prev_sensors_data_json) => match serde_json::from_str(s),
-        //     Err(error) => todo!(),
-        // }
-
-        // let mut file = match std::fs::File::open(SENSORS_DATA_PATH) {
-        //     Ok(file) => file,
-        //     Err(open_error) => {
-        //         return Err(format!("open error: {}: {}", SENSORS_DATA_PATH, open_error));
-        //     },
-        // };
-
         let file = std::fs::File::open(SENSORS_DATA_PATH).map_err(|open_error| format!("open error: {}: {}", SENSORS_DATA_PATH, open_error))?;
         let reader = std::io::BufReader::new(file);
         serde_json::from_reader(reader).map_err(|deser_err| format!("error deserializing sensors data: {}", deser_err))
-
-        // match serde_json::from_reader(reader) {
-        //     Ok(deserialized) => Ok(deserialized),
-        //     Err(deserialization_error) => Err(format!("error deserializing sensors data: {}", deserialization_error))
-        // }
-
-        // let mut file_content = String::new();
-        // file.read_to_string(&mut file_content).ok();
-
-        // match serde_json::from_str(&file_content) {
-        //     Ok(deserialized) => Ok(deserialized),
-        //     Err(deserialization_error) => Err(format!("error deserializing sensors data: {}", deserialization_error))
-        // }
     }
 
 }

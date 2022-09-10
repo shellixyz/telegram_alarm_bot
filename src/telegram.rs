@@ -61,7 +61,6 @@ where
 }
 
 pub async fn send_message(bot: &AutoSend<Bot>, message: &str) {
-    // let message = message.to_string().replace('(', ')')
     let send_message = bot
         .send_message(MAISON_ESSERT_CHAT_ID, message)
         .parse_mode(teloxide::types::ParseMode::Html);
