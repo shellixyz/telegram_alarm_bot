@@ -102,7 +102,14 @@ async fn handle_commands(bot: &AutoSend<Bot>, command: &str, shared_data: &Prote
             send_message(bot, format!("Notifications are {}", notifications_status_str).as_str()).await;
         },
 
-        _ => send_message(bot, "Invalid command").await
+        "/help" => {
+            send_message(bot, "/enable - enable notifications\n\
+                                        /disable - disable notifications\n\
+                                        /status - display bot and sensors status\n\
+                                        /battery - display latest sensors battery info").await;
+        }
+
+        _ => send_message(bot, "Invalid command, use /help to display available commands").await
     }
 
 }
