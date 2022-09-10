@@ -2,52 +2,51 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
-use std::time;
 use compound_duration::format_dhms;
 
 pub type Data = HashMap<String, serde_json::Value>;
 
 trait TimeSinceLastUpdate {
-    fn time_since_last_update(&self) -> time::Duration;
+    fn time_since_last_update(&self) -> chrono::Duration;
 }
 
 pub struct CommonBatteryState {
-    pub(self) update_timestamp: time::Instant,
+    pub(self) update_timestamp: chrono::DateTime<chrono::Local>,
     value: u8
 }
 
 impl CommonBatteryState {
     fn new(value: u8) -> Self {
         Self {
-            update_timestamp: time::Instant::now(),
+            update_timestamp: chrono::Local::now(),
             value
         }
     }
 }
 
 impl TimeSinceLastUpdate for CommonBatteryState {
-    fn time_since_last_update(&self) -> time::Duration {
-        self.update_timestamp.elapsed()
+    fn time_since_last_update(&self) -> chrono::Duration {
+        chrono::Local::now().signed_duration_since(self.update_timestamp)
     }
 }
 
 pub struct CommonVoltageState {
-    update_timestamp: time::Instant,
+    update_timestamp: chrono::DateTime<chrono::Local>,
     value: f32
 }
 
 impl CommonVoltageState {
     fn new(value: f32) -> Self {
         Self {
-            update_timestamp: time::Instant::now(),
+            update_timestamp: chrono::Local::now(),
             value
         }
     }
 }
 
 impl TimeSinceLastUpdate for CommonVoltageState {
-    fn time_since_last_update(&self) -> time::Duration {
-        self.update_timestamp.elapsed()
+    fn time_since_last_update(&self) -> chrono::Duration {
+        chrono::Local::now().signed_duration_since(self.update_timestamp)
     }
 }
 
@@ -66,19 +65,19 @@ impl CommonState {
 
     pub fn update_battery(&mut self, battery: u8) {
         self.battery = Some(CommonBatteryState {
-            update_timestamp: time::Instant::now(),
+            update_timestamp: chrono::Local::now(),
             value: battery
         });
     }
 
     pub fn update_voltage(&mut self, voltage: f32) {
         self.voltage = Some(CommonVoltageState {
-            update_timestamp: time::Instant::now(),
+            update_timestamp: chrono::Local::now(),
             value: voltage
         });
     }
 
-    pub fn time_max_since_last_update(&self) -> Option<time::Duration> {
+    pub fn time_max_since_last_update(&self) -> Option<chrono::Duration> {
         match (&self.battery, &self.voltage) {
             (None, None) => None,
             (None, Some(voltage)) => Some(voltage.time_since_last_update()),
@@ -90,7 +89,7 @@ impl CommonState {
 
     pub fn time_max_since_last_update_str(&self) -> String {
         match self.time_max_since_last_update() {
-            Some(duration) => format!("last update {} ago", format_dhms(duration.as_secs())),
+            Some(duration) => format!("last update {} ago", format_dhms(std::cmp::max(0, duration.num_seconds()))),
             None => "no data".to_owned(),
         }
     }
@@ -117,20 +116,20 @@ pub enum SpecificStateValue {
 }
 
 pub struct SpecificState {
-    timestamp: time::Instant,
+    update_timestamp: chrono::DateTime<chrono::Local>,
     pub value: SpecificStateValue
 }
 
 impl SpecificState {
     fn new(value: SpecificStateValue) -> Self {
         Self {
-            timestamp: time::Instant::now(),
+            update_timestamp: chrono::Local::now(),
             value
         }
     }
 
-    pub fn time_since_last_update(&self) -> time::Duration {
-        self.timestamp.elapsed()
+    pub fn time_since_last_update(&self) -> chrono::Duration {
+        chrono::Local::now().signed_duration_since(self.update_timestamp)
     }
 }
 

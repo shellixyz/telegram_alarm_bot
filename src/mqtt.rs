@@ -1,6 +1,5 @@
 
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet};
-use std::time::Duration;
 
 use crate::sensors;
 use crate::{ProtectedSharedState, telegram::{SharedBot, self}};
@@ -8,7 +7,7 @@ use crate::{ProtectedSharedState, telegram::{SharedBot, self}};
 pub async fn listen(shared_bot: SharedBot, shared_state: ProtectedSharedState) {
 
     let mut mqtt_options = MqttOptions::new("telegram-alarm-bot", "localhost", 1883);
-    mqtt_options.set_keep_alive(Duration::from_secs(5));
+    mqtt_options.set_keep_alive(std::time::Duration::from_secs(5));
 
     let (client, mut event_loop) = AsyncClient::new(mqtt_options, 10);
     client.subscribe("zigbee2mqtt/+", QoS::AtMostOnce).await.unwrap();
