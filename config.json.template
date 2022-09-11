@@ -1,0 +1,26 @@
+{
+    "mqtt_broker": {
+        "hostname": "localhost",
+        "port": 1883
+    },
+    "telegram": {
+        "token": "XXXXX",
+        "notification_chat_ids": [ 1111 ],
+        "admin_chat_ids": [ 2222 ]
+    },
+    "sensors": {
+        "zigbee2mqtt": {
+            "Door opening sensor": {
+                "contact": {
+                    "false": "The door has been opened",
+                    "true": "The door has been closed"
+                }
+            },
+            "^(?:(?P<location>\\w+) )?[Mm]otion sensor \\((?P<id>\\d+)\\)$": {
+                "vacancy": {
+                    "false": "Motion detected in {location} (sensor #{id})"
+                }
+            }
+        }
+    }
+}

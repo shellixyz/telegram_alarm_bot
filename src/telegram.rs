@@ -1,6 +1,6 @@
 
 //const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(-688154163);
-const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(554088050);
+// const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(554088050);
 
 use teloxide::{prelude::*, dispatching};
 use std::sync::Arc;
@@ -8,22 +8,25 @@ use tokio::sync::Mutex;
 use Sync;
 
 use crate::ProtectedSharedState;
+use crate::config;
 
 pub type SharedBot = Arc<Mutex<AutoSend<Bot>>>;
 
-pub async fn start_repl(shared_state: ProtectedSharedState) -> SharedBot {
+pub async fn start_repl(config: &config::Telegram, shared_state: ProtectedSharedState) -> SharedBot {
 
-    let bot = Bot::from_env().auto_send();
+    // let bot = Bot::from_env().auto_send();
+    let bot = Bot::new(&config.token).auto_send();
     let shared_bot = Arc::new(Mutex::new(bot.clone()));
     let repl_shared_bot = shared_bot.clone();
 
     tokio::spawn(
-        repl_with_deps(bot, repl_shared_bot, shared_state, |message: Message, _bot: AutoSend<Bot>, shared_bot: SharedBot, shared_state: ProtectedSharedState| async move {
-            if message.chat.id == MAISON_ESSERT_CHAT_ID {
+        repl_with_deps(bot, repl_shared_bot, shared_state, config.valid_chat_ids(), |message: Message, _bot: AutoSend<Bot>, shared_bot: SharedBot, shared_state: ProtectedSharedState, valid_chat_ids: Vec<ChatId>| async move {
+            // if valid_chat_ids.is_none() || valid_chat_ids.unwrap().contains(&message.chat.id) {
+            if valid_chat_ids.contains(&message.chat.id) {
                 if let Some(command) = message.text() {
                     println!("Got message with text: {:?}", command);
                     let locked_bot = shared_bot.lock().await;
-                    handle_commands(&locked_bot, command, &shared_state).await;
+                    handle_commands(&locked_bot, &message.chat.id, command, &shared_state).await;
                 }
             }
             respond(())
@@ -33,7 +36,7 @@ pub async fn start_repl(shared_state: ProtectedSharedState) -> SharedBot {
     shared_bot
 }
 
-async fn repl_with_deps<'a, R, H, E, D1, D2, Args>(bot: R, dep1: D1, dep2: D2, handler: H)
+async fn repl_with_deps<'a, R, H, E, D1, D2, D3, Args>(bot: R, dep1: D1, dep2: D2, dep3: D3, handler: H)
 where
     H: dptree::di::Injectable<DependencyMap, Result<(), E>, Args> + Send + Sync + 'static,
     Result<(), E>: OnError<E>,
@@ -41,7 +44,8 @@ where
     R: Requester + Send + Sync + Clone + 'static,
     <R as Requester>::GetUpdates: Send,
     D1: Send + Sync + 'static,
-    D2: Send + Sync + 'static
+    D2: Send + Sync + 'static,
+    D3: Send + Sync + 'static
 {
     let listener = dispatching::update_listeners::polling_default(bot.clone()).await;
 
@@ -50,7 +54,7 @@ where
     let ignore_update = |_upd| Box::pin(async {});
 
     Dispatcher::builder(bot, Update::filter_message().chain(dptree::endpoint(handler)))
-        .dependencies(dptree::deps![dep1, dep2])
+        .dependencies(dptree::deps![dep1, dep2, dep3])
         .default_handler(ignore_update)
         .build()
         .dispatch_with_listener(
@@ -60,22 +64,25 @@ where
         .await;
 }
 
-pub async fn send_message(bot: &AutoSend<Bot>, message: &str) {
+pub async fn send_message(bot: &AutoSend<Bot>, chat_id: &ChatId, message: &str) {
     let send_message = bot
-        .send_message(MAISON_ESSERT_CHAT_ID, message)
+        .send_message(*chat_id, message)
         .parse_mode(teloxide::types::ParseMode::Html);
     if let Err(send_error) = send_message.await {
         log::error!("Failed to send notification message: {}", send_error);
     }
 }
 
-pub async fn shared_bot_send_message(shared_bot: &tokio::sync::MutexGuard<'_, AutoSend<Bot>>, message: &str) {
-    if let Err(send_error) = shared_bot.send_message(MAISON_ESSERT_CHAT_ID, message).await {
+pub async fn shared_bot_send_message(shared_bot: &tokio::sync::MutexGuard<'_, AutoSend<Bot>>, chat_id: &ChatId, message: &str) {
+    let send_message = shared_bot
+        .send_message(*chat_id, message)
+        .parse_mode(teloxide::types::ParseMode::Html);
+    if let Err(send_error) = send_message.await {
         log::error!("Failed to send notification message: {}", send_error);
     }
 }
 
-async fn handle_commands(bot: &AutoSend<Bot>, command: &str, shared_data: &ProtectedSharedState) {
+async fn handle_commands(bot: &AutoSend<Bot>, chat_id: &ChatId, command: &str, shared_data: &ProtectedSharedState) {
     let mut locked_shared_data = shared_data.lock().await;
     match command {
 
@@ -84,17 +91,17 @@ async fn handle_commands(bot: &AutoSend<Bot>, command: &str, shared_data: &Prote
                 format!("• <b>{}</b>: {} / {} ({})", sensor_name, prev_sensor_data.common.battery_value_str(), prev_sensor_data.common.voltage_value_str(), prev_sensor_data.common.time_max_since_last_update_str())
             }).collect::<Vec<String>>().join("\n");
             let message = if battery_info.is_empty() { "No data" } else { battery_info.as_str() };
-            send_message(bot, message).await
+            send_message(bot, chat_id, message).await
         },
 
         "/enable" => {
             locked_shared_data.notifications_enabled = true;
-            send_message(bot, "Notifications enabled").await;
+            send_message(bot, chat_id, "Notifications enabled").await;
         },
 
         "/disable" => {
             locked_shared_data.notifications_enabled = false;
-            send_message(bot, "Notifications disabled").await;
+            send_message(bot, chat_id, "Notifications disabled").await;
         },
 
         "/status" => {
@@ -106,17 +113,17 @@ async fn handle_commands(bot: &AutoSend<Bot>, command: &str, shared_data: &Prote
                 true => "enabled",
                 false => "disabled",
             };
-            send_message(bot, format!("Sensors:\n{}\n\nNotifications are {}", sensor_info_str, notifications_status_str).as_str()).await;
+            send_message(bot, chat_id, format!("Sensors:\n{}\n\nNotifications are {}", sensor_info_str, notifications_status_str).as_str()).await;
         },
 
         "/help" => {
-            send_message(bot, "/enable - enable notifications\n\
+            send_message(bot, chat_id, "/enable - enable notifications\n\
                                         /disable - disable notifications\n\
                                         /status - display bot and sensors status\n\
                                         /battery - display latest sensors battery info").await;
         }
 
-        _ => send_message(bot, "Invalid command, use /help to display available commands").await
+        _ => send_message(bot, chat_id, "Invalid command, use /help to display available commands").await
     }
 
 }

@@ -1,6 +1,7 @@
 
 pub mod telegram;
 pub mod sensors;
+pub mod config;
 
 use std::sync::Arc;
 use sensors::PrevSensorsData;

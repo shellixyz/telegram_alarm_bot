@@ -1,24 +1,29 @@
 
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet, EventLoop};
+use teloxide::types::ChatId;
 
 use crate::sensors;
+use crate::config::Config;
 use crate::{ProtectedSharedState, telegram::{SharedBot, self}};
 
-pub async fn init() -> EventLoop {
+pub async fn init(config: &Config) -> EventLoop {
     let mut mqtt_options = MqttOptions::new("telegram-alarm-bot", "localhost", 1883);
     mqtt_options.set_keep_alive(std::time::Duration::from_secs(5));
 
     let (client, event_loop) = AsyncClient::new(mqtt_options, 10);
-    client.subscribe("zigbee2mqtt/+", QoS::AtMostOnce).await.unwrap();
+
+    for subscribe_pattern in config.mqtt_subscribe_patterns() {
+        client.subscribe(subscribe_pattern, QoS::AtMostOnce).await.unwrap();
+    }
 
     event_loop
 }
 
-pub async fn handle_events(event_loop: &mut EventLoop, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) {
+pub async fn handle_events(event_loop: &mut EventLoop, notification_chat_ids: &Vec<ChatId>, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) {
 
     match event_loop.poll().await {
         Ok(Event::Incoming(Packet::Publish(publish))) => {
-            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, &shared_bot, &shared_state).await {
+            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, notification_chat_ids, &shared_bot, &shared_state).await {
                 println!("Error processing zigbee2mqtt publish notification: {}", error_str);
             }
         },
@@ -28,7 +33,7 @@ pub async fn handle_events(event_loop: &mut EventLoop, shared_bot: &SharedBot, s
 
 }
 
-async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) -> Result<(), &'static str> {
+async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, notification_chat_ids: &Vec<ChatId>, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) -> Result<(), &'static str> {
 
     println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
 
@@ -58,7 +63,9 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, sha
         };
 
         if let Some(sensor_message) = sensor.message(&sensor_data, &prev_sensor_specific_state)? {
-            telegram::shared_bot_send_message(&shared_bot.lock().await, sensor_message.as_str()).await;
+            for chat_id in notification_chat_ids {
+                telegram::shared_bot_send_message(&shared_bot.lock().await, chat_id, sensor_message.as_str()).await;
+            }
         }
     }
 
