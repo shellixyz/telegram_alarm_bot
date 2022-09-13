@@ -1,8 +1,10 @@
 
 
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::FromIterator};
+use regex::Regex;
 use serde::Deserialize;
 use teloxide::types::ChatId;
+use std::ops::Deref;
 
 #[derive(Deserialize, Debug)]
 pub struct MqttBroker {
@@ -13,19 +15,92 @@ pub struct MqttBroker {
 pub type SensorState = String;
 pub type SensorStateMessage = String;
 
+pub type SensorStateMessagesInner = HashMap<SensorState, SensorStateMessage>;
+
 #[derive(Deserialize, Debug)]
-pub struct SensorStateMessages(pub HashMap<SensorState, SensorStateMessage>);
+pub struct SensorStateMessages(pub SensorStateMessagesInner);
+
+impl std::ops::Deref for SensorStateMessages {
+    type Target = SensorStateMessagesInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 pub type SensorNameRegex = String;
 pub type PayloadFieldName = String;
 
-pub type PayloadFieldNameAndStateMessages = HashMap<PayloadFieldName, SensorStateMessages>;
+pub type SensorPayloadFieldNameAndStateMessagesInner = HashMap<PayloadFieldName, SensorStateMessages>;
 
 #[derive(Deserialize, Debug)]
-pub struct Sensor(pub HashMap<SensorNameRegex, PayloadFieldNameAndStateMessages>);
+pub struct SensorPayloadFieldNameAndStateMessages(pub SensorPayloadFieldNameAndStateMessagesInner);
 
-pub type MqttTopic = String;
-pub type MqttTopics = HashMap<MqttTopic, Sensor>;
+impl SensorPayloadFieldNameAndStateMessages {
+
+    pub fn payload_field_names(&self) -> Vec<&String> {
+        self.keys().collect()
+    }
+
+}
+
+impl Deref for SensorPayloadFieldNameAndStateMessages {
+    type Target = SensorPayloadFieldNameAndStateMessagesInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub type SensorNameCaptures = HashMap<String, Option<String>>;
+
+#[derive(Deserialize, Debug)]
+pub struct Sensors(pub HashMap<SensorNameRegex, SensorPayloadFieldNameAndStateMessages>);
+
+impl Sensors {
+
+    // returns: captures, sensor_payload_field_names_and_state_messages
+    pub fn match_sensor_name(&self, sensor_name: &str) -> Result<Option<(SensorNameCaptures, &SensorPayloadFieldNameAndStateMessages)>, String> {
+        for (sensor_name_re_str, payload_field_name_and_state_messages) in self.0.iter() {
+            let re = Regex::new(sensor_name_re_str).map_err(|error| format!("invalid sensor name regex: {}", error))?;
+            if let Some(captures) = re.captures(sensor_name) {
+                let name_captures: SensorNameCaptures = HashMap::from_iter(re.capture_names().skip(1).map(|cname| {
+                    let cname = cname.unwrap();
+                    let cstr = captures.name(cname).map(|ncap| ncap.as_str().to_string());
+                    (cname.to_string(), cstr)
+                }));
+                return Ok(Some((name_captures, payload_field_name_and_state_messages)));
+            }
+        }
+        Ok(None)
+    }
+
+}
+
+pub type MqttTopicBase = String;
+
+#[derive(Deserialize, Debug)]
+pub struct MqttTopics(HashMap<MqttTopicBase, Sensors>);
+
+impl MqttTopics {
+
+    // returns: captures, sensor_payload_field_names_and_state_messages
+    pub fn match_topic(&self, topic: &String) -> Result<Option<(SensorNameCaptures, &SensorPayloadFieldNameAndStateMessages)>, String> {
+        let tmatch = self.0.iter().find(|(topic_base, _)| {
+            let base_slash = (*topic_base).clone() + "/";
+            topic.starts_with(&base_slash)
+        });
+
+        match tmatch {
+            Some((topic_base, sensors)) => {
+                let sensor_name = &topic[topic_base.len()+1..];
+                sensors.match_sensor_name(sensor_name)
+            },
+            None => Ok(None),
+        }
+    }
+
+}
 
 mod chat_ids {
     use teloxide::types::ChatId;
@@ -86,11 +161,11 @@ impl Config {
     }
 
     pub fn mqtt_topics(&self) -> Vec<&String> {
-        self.mqtt_topics.keys().collect()
+        self.mqtt_topics.0.keys().collect()
     }
 
     pub fn mqtt_subscribe_patterns(&self) -> Vec<String> {
-        self.mqtt_topics.keys().map(|mqtt_topic| format!("{mqtt_topic}/+")).collect()
+        self.mqtt_topics.0.keys().map(|mqtt_topic| format!("{mqtt_topic}/+")).collect()
     }
 
 }

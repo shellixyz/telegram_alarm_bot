@@ -64,7 +64,7 @@ async fn main() {
 
     loop {
         tokio::select! {
-            () = mqtt::handle_events(&mut mqtt_event_loop, &config.telegram.notification_chat_ids, &shared_bot, &shared_state) => {},
+            () = mqtt::handle_events(&mut mqtt_event_loop, &config, &shared_bot, &shared_state) => {},
             Ok(_) = tokio::signal::ctrl_c() => terminate("Ctrl-C", shared_state).await,
             Some(_) = sigterm_stream.recv() => terminate("SIGTERM", shared_state).await
         }

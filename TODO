@@ -1,5 +1,5 @@
 X send PM to me when the bot is started (to catch restarts due to panics)
-- json configuration file
+X json configuration file
 X add /help command
 X improve status command: list sensors and "last seen"
 - better/cleaner error handling

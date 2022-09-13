@@ -21,7 +21,6 @@ pub async fn start_repl(config: &config::Telegram, shared_state: ProtectedShared
 
     tokio::spawn(
         repl_with_deps(bot, repl_shared_bot, shared_state, config.valid_chat_ids(), |message: Message, _bot: AutoSend<Bot>, shared_bot: SharedBot, shared_state: ProtectedSharedState, valid_chat_ids: Vec<ChatId>| async move {
-            // if valid_chat_ids.is_none() || valid_chat_ids.unwrap().contains(&message.chat.id) {
             if valid_chat_ids.contains(&message.chat.id) {
                 if let Some(command) = message.text() {
                     println!("Got message with text: {:?}", command);
@@ -105,15 +104,17 @@ async fn handle_commands(bot: &AutoSend<Bot>, chat_id: &ChatId, command: &str, s
         },
 
         "/status" => {
-            let sensor_info_str = locked_shared_data.prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
-                format!("• <b>{}</b>: {}", sensor_name, prev_sensor_data.time_since_last_seen_str())
-            }).collect::<Vec<String>>().join("\n");
+            let sensors_info = locked_shared_data.prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
+                format!("• <b>{}</b>: last seen {} ago", sensor_name, prev_sensor_data.time_since_last_seen())
+            }).collect::<Vec<String>>();
+
+            let sensors_info_str = if sensors_info.is_empty() { "no sensors seen".to_owned() } else { sensors_info.join("\n") };
 
             let notifications_status_str = match locked_shared_data.notifications_enabled {
                 true => "enabled",
                 false => "disabled",
             };
-            send_message(bot, chat_id, format!("Sensors:\n{}\n\nNotifications are {}", sensor_info_str, notifications_status_str).as_str()).await;
+            send_message(bot, chat_id, format!("Sensors:\n{}\n\nNotifications are {}", sensors_info_str, notifications_status_str).as_str()).await;
         },
 
         "/help" => {
