@@ -1,6 +1,8 @@
 
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet, EventLoop};
 
+use crate::config;
+
 use crate::sensors;
 use crate::config::Config;
 use crate::{ProtectedSharedState, telegram::{SharedBot, self}};
@@ -30,6 +32,43 @@ pub async fn handle_events(event_loop: &mut EventLoop, config: &Config, shared_b
         _ => {}
     }
 
+}
+
+async fn update_prev_sensor_data(shared_state: &ProtectedSharedState, topic: &String, sensor_payload_field_names_and_state_messages: &config::SensorPayloadFieldNameAndStateMessages, sensor_data: &sensors::Data) {
+    let mut locked_shared_state = shared_state.lock().await;
+
+    let prev_sensor_data = locked_shared_state.prev_sensors_data.entry(topic.clone()).or_default();
+    prev_sensor_data.last_seen_now();
+
+    for field_name in sensor_payload_field_names_and_state_messages.payload_field_names() {
+        if let Some(field_value) = sensor_data.get(field_name) {
+            prev_sensor_data.trigger_states.insert(field_name.clone(), field_value.clone());
+        }
+    }
+
+    match sensor_data.get("battery") {
+            Some(serde_json::Value::Number(battery)) =>
+                match battery.as_u64() {
+                    Some(battery) => match u8::try_from(battery) {
+                        Ok(battery) => prev_sensor_data.update_battery(battery),
+                        Err(_) => log::error!("number too large to be represented as u8")
+                    },
+                    None => log::error!("impossible to get voltage value as u64")
+                },
+                None => {},
+                _ => log::error!("got invalid sensor voltage value type")
+    };
+
+
+    match sensor_data.get("voltage") {
+        Some(serde_json::Value::Number(voltage)) =>
+            match voltage.as_f64() {
+                Some(voltage) => prev_sensor_data.update_voltage(voltage as f32 / 1000.0),
+                None => log::error!("impossible to get voltage value as f64")
+            },
+            None => {},
+        _ => log::error!("got invalid sensor voltage value type")
+    };
 }
 
 async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, config: &Config, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) -> Result<(), String> {
@@ -67,41 +106,7 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, con
             }
         }
 
-        let mut locked_shared_state = shared_state.lock().await;
-
-        let prev_sensor_data = locked_shared_state.prev_sensors_data.entry(publish.topic.clone()).or_default();
-        prev_sensor_data.last_seen_now();
-
-        for field_name in sensor_payload_field_names_and_state_messages.payload_field_names() {
-            if let Some(field_value) = sensor_data.get(field_name) {
-                prev_sensor_data.trigger_states.insert(field_name.clone(), field_value.clone());
-            }
-        }
-
-        match sensor_data.get("battery") {
-                Some(serde_json::Value::Number(battery)) =>
-                    match battery.as_u64() {
-                        Some(battery) => match u8::try_from(battery) {
-                            Ok(battery) => prev_sensor_data.update_battery(battery),
-                            Err(_) => log::error!("number too large to be represented as u8")
-                        },
-                        None => log::error!("impossible to get voltage value as u64")
-                    },
-                    None => {},
-                    _ => log::error!("got invalid sensor voltage value type")
-        };
-
-
-        match sensor_data.get("voltage") {
-            Some(serde_json::Value::Number(voltage)) =>
-                match voltage.as_f64() {
-                    Some(voltage) => prev_sensor_data.update_voltage(voltage as f32 / 1000.0),
-                    None => log::error!("impossible to get voltage value as f64")
-                },
-                None => {},
-            _ => log::error!("got invalid sensor voltage value type")
-        };
-
+        update_prev_sensor_data(shared_state, &publish.topic, sensor_payload_field_names_and_state_messages, &sensor_data).await;
 
     }
 
