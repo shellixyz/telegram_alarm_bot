@@ -3,3 +3,4 @@ X json configuration file
 X add /help command
 X improve status command: list sensors and "last seen"
 - better/cleaner error handling
+- add mode to discover chat IDs

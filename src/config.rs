@@ -1,5 +1,4 @@
 
-
 use std::{collections::HashMap, iter::FromIterator};
 use regex::Regex;
 use serde::Deserialize;
@@ -53,9 +52,18 @@ impl Deref for SensorPayloadFieldNameAndStateMessages {
 }
 
 pub type SensorNameCaptures = HashMap<String, Option<String>>;
+pub type SensorsInner = HashMap<SensorNameRegex, SensorPayloadFieldNameAndStateMessages>;
 
 #[derive(Deserialize, Debug)]
-pub struct Sensors(pub HashMap<SensorNameRegex, SensorPayloadFieldNameAndStateMessages>);
+pub struct Sensors(pub SensorsInner);
+
+impl Deref for Sensors {
+    type Target = SensorsInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl Sensors {
 
@@ -78,9 +86,18 @@ impl Sensors {
 }
 
 pub type MqttTopicBase = String;
+pub type MqttTopicsInner = HashMap<MqttTopicBase, Sensors>;
 
 #[derive(Deserialize, Debug)]
-pub struct MqttTopics(HashMap<MqttTopicBase, Sensors>);
+pub struct MqttTopics(pub MqttTopicsInner);
+
+impl Deref for MqttTopics {
+    type Target = MqttTopicsInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl MqttTopics {
 
@@ -166,6 +183,19 @@ impl Config {
 
     pub fn mqtt_subscribe_patterns(&self) -> Vec<String> {
         self.mqtt_topics.0.keys().map(|mqtt_topic| format!("{mqtt_topic}/+")).collect()
+    }
+
+    pub fn check(&self) -> bool {
+        let mut config_good = true;
+        for (_, sensors) in self.mqtt_topics.iter() {
+            for (sensor_name_re, _) in sensors.iter() {
+                if let Err(re_error) = Regex::new(&sensor_name_re) {
+                    println!("\n{re_error}");
+                    config_good = false;
+                }
+            }
+        }
+        config_good
     }
 
 }

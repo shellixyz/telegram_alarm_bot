@@ -1,7 +1,4 @@
 
-//const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(-688154163);
-// const MAISON_ESSERT_CHAT_ID: ChatId = ChatId(554088050);
-
 use teloxide::{prelude::*, dispatching};
 use std::sync::Arc;
 use tokio::sync::Mutex;

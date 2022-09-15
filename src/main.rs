@@ -1,19 +1,19 @@
-use telegram_alarm_bot::{SharedState, sensors::PrevSensorsData, telegram::SharedBot};
 
-pub mod telegram;
-pub mod mqtt;
-pub mod sensors;
-pub mod config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use telegram_alarm_bot::ProtectedSharedState;
 use tokio::signal::unix::{signal,SignalKind};
 use teloxide::types::ChatId;
 use clap::Parser;
+use telegram_alarm_bot::{config,mqtt,sensors,telegram};
+use config::Config;
+use telegram::SharedBot;
+use sensors::PrevSensorsData;
+use telegram_alarm_bot::{SharedState,ProtectedSharedState};
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Cli {
+    /// don't run bot, only check config file
     #[clap(short, long, action)]
     check_only: bool,
 
@@ -22,7 +22,7 @@ struct Cli {
 }
 
 
-async fn terminate(source: &str, shared_state: Arc<Mutex<SharedState>>) -> ! {
+async fn terminate(source: &str, shared_state: ProtectedSharedState) -> ! {
     log::info!("received {}, terminating", source);
 
     let locked_shared_data = shared_state.lock().await;
@@ -41,7 +41,7 @@ async fn notify_start(shared_bot: &SharedBot, notification_chat_ids: &Vec<ChatId
     }
 }
 
-async fn load_prev_sensors_data(shared_state: &Arc<Mutex<SharedState>>) {
+async fn load_prev_sensors_data(shared_state: &ProtectedSharedState) {
     match PrevSensorsData::load_from_file() {
         Ok(prev_sensors_data_from_file) => {
             let mut shared_state_locked = shared_state.lock().await;
@@ -54,36 +54,46 @@ async fn load_prev_sensors_data(shared_state: &Arc<Mutex<SharedState>>) {
     };
 }
 
-#[tokio::main]
-async fn main() {
+async fn bot(config: &Config) {
     pretty_env_logger::formatted_builder().parse_filters("info").init();
 
-    let cli = Cli::parse();
+    let mut sigterm_stream = signal(SignalKind::terminate()).expect("failed to setup termination handler");
 
-    println!("check: {}", cli.check_only);
+    let shared_state = Arc::new(Mutex::new(SharedState::new()));
 
-    let config = config::Config::load_from_file(&cli.config_file).expect("config load error");
-    println!("{config:?}");
+    load_prev_sensors_data(&shared_state).await;
 
-    if !cli.check_only {
-        let mut sigterm_stream = signal(SignalKind::terminate()).expect("failed to setup termination handler");
+    let shared_bot = telegram::start_repl(&config.telegram, shared_state.clone()).await;
 
-        let shared_state = Arc::new(Mutex::new(SharedState::new()));
+    let mut mqtt_event_loop = mqtt::init(&config).await;
 
-        load_prev_sensors_data(&shared_state).await;
+    notify_start(&shared_bot, &config.telegram.notification_chat_ids).await;
 
-        let shared_bot = telegram::start_repl(&config.telegram, shared_state.clone()).await;
-
-        let mut mqtt_event_loop = mqtt::init(&config).await;
-
-        notify_start(&shared_bot, &config.telegram.notification_chat_ids).await;
-
-        loop {
-            tokio::select! {
-                () = mqtt::handle_events(&mut mqtt_event_loop, &config, &shared_bot, &shared_state) => {},
-                Ok(_) = tokio::signal::ctrl_c() => terminate("Ctrl-C", shared_state).await,
-                Some(_) = sigterm_stream.recv() => terminate("SIGTERM", shared_state).await
-            }
+    loop {
+        tokio::select! {
+            () = mqtt::handle_events(&mut mqtt_event_loop, &config, &shared_bot, &shared_state) => {},
+            Ok(_) = tokio::signal::ctrl_c() => terminate("Ctrl-C", shared_state).await,
+            Some(_) = sigterm_stream.recv() => terminate("SIGTERM", shared_state).await
         }
+    }
+}
+
+fn check_config(config: &Config) {
+    println!("Checking config...");
+    match config.check() {
+        true => println!("OK"),
+        false => std::process::exit(1)
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    let config = config::Config::load_from_file(&cli.config_file).expect("config load error");
+
+    if cli.check_only {
+        check_config(&config);
+    } else {
+        bot(&config).await;
     }
 }

@@ -3,26 +3,9 @@ use std::{collections::HashMap, ops::{Deref, DerefMut}};
 use compound_duration::format_dhms;
 use serde::{Serialize,Deserialize};
 
+use crate::time::{LastSeenDuration,Timestamp};
+
 const SENSORS_DATA_PATH: &str = "sensors_data.json";
-
-pub type TimestampInner = chrono::DateTime<chrono::Local>;
-
-#[derive(Serialize,Deserialize)]
-pub struct Timestamp(pub TimestampInner);
-
-impl Deref for Timestamp {
-    type Target = TimestampInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Timestamp {
-    pub fn now() -> Self {
-        Self(chrono::Local::now())
-    }
-}
 
 pub type Data = HashMap<String, serde_json::Value>;
 
@@ -32,7 +15,7 @@ trait TimeSinceLastUpdate {
 
 #[derive(Serialize,Deserialize)]
 pub struct CommonBatteryState {
-    pub(self) update_timestamp: Timestamp,
+    update_timestamp: Timestamp,
     value: u8
 }
 
@@ -117,29 +100,6 @@ impl CommonState {
         }
     }
 
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub struct LastSeenDuration(chrono::Duration);
-
-impl LastSeenDuration {
-    fn new(seen_timestamp: &Timestamp) -> Self {
-        Self(chrono::Local::now().signed_duration_since(seen_timestamp.0))
-    }
-}
-
-impl std::fmt::Display for LastSeenDuration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(format_dhms(std::cmp::max(0, self.0.num_seconds())).as_str())
-    }
-}
-
-impl Deref for LastSeenDuration {
-    type Target = chrono::Duration;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
 }
 
 pub type SensorValue = serde_json::Value;
@@ -233,13 +193,5 @@ impl Deref for PrevSensorsData {
 impl DerefMut for PrevSensorsData {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-pub enum Sensor {
-    Contact,
-    Motion {
-        location: Option<String>,
-        id: usize
     }
 }
