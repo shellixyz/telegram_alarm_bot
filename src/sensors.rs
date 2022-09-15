@@ -1,7 +1,8 @@
 
-use std::{collections::HashMap, ops::{Deref, DerefMut}};
+use std::collections::HashMap;
 use compound_duration::format_dhms;
 use serde::{Serialize,Deserialize};
+use derive_more::{Deref,DerefMut};
 
 use crate::time::{LastSeenDuration,Timestamp};
 
@@ -152,7 +153,7 @@ type Name = String;
 
 type PrevSensorsDataInner = HashMap<Name, PrevData>;
 
-#[derive(Serialize,Deserialize,Default)]
+#[derive(Serialize,Deserialize,Default,Deref,DerefMut)]
 pub struct PrevSensorsData(PrevSensorsDataInner);
 
 impl PrevSensorsData {
@@ -180,18 +181,4 @@ impl PrevSensorsData {
         serde_json::from_reader(reader).map_err(|deser_err| format!("error deserializing sensors data: {}", deser_err))
     }
 
-}
-
-impl Deref for PrevSensorsData {
-    type Target = PrevSensorsDataInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for PrevSensorsData {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
 }

@@ -1271,6 +1271,7 @@ dependencies = [
  "chrono",
  "clap",
  "compound_duration",
+ "derive_more",
  "lazy_static",
  "log",
  "pretty_env_logger",

@@ -3,7 +3,7 @@ use std::{collections::HashMap, iter::FromIterator};
 use regex::Regex;
 use serde::Deserialize;
 use teloxide::types::ChatId;
-use std::ops::Deref;
+use derive_more::Deref;
 
 #[derive(Deserialize, Debug)]
 pub struct MqttBroker {
@@ -16,24 +16,16 @@ pub type SensorStateMessage = String;
 
 pub type SensorStateMessagesInner = HashMap<SensorState, SensorStateMessage>;
 
-#[derive(Deserialize, Debug)]
-pub struct SensorStateMessages(pub SensorStateMessagesInner);
-
-impl std::ops::Deref for SensorStateMessages {
-    type Target = SensorStateMessagesInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+#[derive(Deserialize, Debug, Deref)]
+pub struct SensorStateMessages(SensorStateMessagesInner);
 
 pub type SensorNameRegex = String;
 pub type PayloadFieldName = String;
 
 pub type SensorPayloadFieldNameAndStateMessagesInner = HashMap<PayloadFieldName, SensorStateMessages>;
 
-#[derive(Deserialize, Debug)]
-pub struct SensorPayloadFieldNameAndStateMessages(pub SensorPayloadFieldNameAndStateMessagesInner);
+#[derive(Deserialize, Debug, Deref)]
+pub struct SensorPayloadFieldNameAndStateMessages(SensorPayloadFieldNameAndStateMessagesInner);
 
 impl SensorPayloadFieldNameAndStateMessages {
 
@@ -43,27 +35,11 @@ impl SensorPayloadFieldNameAndStateMessages {
 
 }
 
-impl Deref for SensorPayloadFieldNameAndStateMessages {
-    type Target = SensorPayloadFieldNameAndStateMessagesInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 pub type SensorNameCaptures = HashMap<String, Option<String>>;
 pub type SensorsInner = HashMap<SensorNameRegex, SensorPayloadFieldNameAndStateMessages>;
 
-#[derive(Deserialize, Debug)]
-pub struct Sensors(pub SensorsInner);
-
-impl Deref for Sensors {
-    type Target = SensorsInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+#[derive(Deserialize, Debug, Deref)]
+pub struct Sensors(SensorsInner);
 
 impl Sensors {
 
@@ -88,16 +64,8 @@ impl Sensors {
 pub type MqttTopicBase = String;
 pub type MqttTopicsInner = HashMap<MqttTopicBase, Sensors>;
 
-#[derive(Deserialize, Debug)]
-pub struct MqttTopics(pub MqttTopicsInner);
-
-impl Deref for MqttTopics {
-    type Target = MqttTopicsInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+#[derive(Deserialize, Debug, Deref)]
+pub struct MqttTopics(MqttTopicsInner);
 
 impl MqttTopics {
 
