@@ -31,6 +31,30 @@ pub async fn start_repl(config: &config::Telegram, shared_state: ProtectedShared
     shared_bot
 }
 
+async fn repl<'a, R, H, E, Args>(bot: R, handler: H)
+where
+    H: dptree::di::Injectable<DependencyMap, Result<(), E>, Args> + Send + Sync + 'static,
+    Result<(), E>: OnError<E>,
+    E: std::fmt::Debug + Send + Sync + 'static,
+    R: Requester + Send + Sync + Clone + 'static,
+    <R as Requester>::GetUpdates: Send,
+{
+    let listener = dispatching::update_listeners::polling_default(bot.clone()).await;
+
+    // Other update types are of no interest to use since this REPL is only for
+    // messages. See <https://github.com/teloxide/teloxide/issues/557>.
+    let ignore_update = |_upd| Box::pin(async {});
+
+    Dispatcher::builder(bot, Update::filter_message().chain(dptree::endpoint(handler)))
+        .default_handler(ignore_update)
+        .build()
+        .dispatch_with_listener(
+            listener,
+            LoggingErrorHandler::with_custom_text("An error from the update listener"),
+        )
+        .await;
+}
+
 async fn repl_with_deps<'a, R, H, E, D1, D2, D3, Args>(bot: R, dep1: D1, dep2: D2, dep3: D3, handler: H)
 where
     H: dptree::di::Injectable<DependencyMap, Result<(), E>, Args> + Send + Sync + 'static,
@@ -123,4 +147,16 @@ async fn handle_commands(bot: &AutoSend<Bot>, chat_id: &ChatId, command: &str, s
         _ => send_message(bot, chat_id, "Invalid command, use /help to display available commands").await
     }
 
+}
+
+pub async fn start_chat_id_discovery(config: &config::Telegram) {
+    let bot = Bot::new(&config.token).auto_send();
+    tokio::spawn(repl(bot, |message: Message, _bot: AutoSend<Bot>| async move {
+        if let Some(message_text) = message.text() {
+            let (first_name, last_name) = (message.chat.first_name(), message.chat.last_name());
+            let chat_name = first_name.into_iter().chain(last_name.into_iter()).collect::<Vec<&str>>().join(" ");
+            log::info!("got text message from chat ID {} ({}): {}", message.chat.id, chat_name, message_text);
+        }
+        respond(())
+    }));
 }

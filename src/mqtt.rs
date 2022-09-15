@@ -29,7 +29,10 @@ pub async fn handle_events(event_loop: &mut EventLoop, config: &Config, shared_b
                 log::error!("Error processing publish notification: {}", error_str);
             }
         },
-        Err(mqtt_connection_error) => log::error!("mqtt connection error: {}", mqtt_connection_error),
+        Err(mqtt_connection_error) => {
+            log::error!("mqtt connection error: {}", mqtt_connection_error);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
         _ => {}
     }
 

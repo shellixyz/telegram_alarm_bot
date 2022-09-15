@@ -139,11 +139,16 @@ pub enum ConfigFileLoadError {
     DeserializationError(serde_json::Error)
 }
 
+fn sensors_data_file_default() -> String {
+    "sensors_data.json".to_owned()
+}
+
 #[derive(Deserialize, Debug)]
 pub struct Config {
     #[serde(default)]
     pub log_level: LogLevel,
 
+    #[serde(default = "sensors_data_file_default")]
     pub sensors_data_file: String,
 
     pub mqtt_broker: Option<MqttBroker>,

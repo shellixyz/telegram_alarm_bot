@@ -15,14 +15,18 @@ use telegram_alarm_bot::log_level::LogLevel;
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 struct Cli {
-    /// don't run bot, only check config file
+    /// Do not run bot, only check config file
     #[clap(short, long, action)]
     check_only: bool,
+
+    /// Start telegram chat ID discovery mode
+    #[clap(short = 'i', long, action)]
+    chat_id_discovery: bool,
 
     #[clap(value_parser, default_value_t = String::from("config.json"))]
     config_file: String,
 
-    /// the default level if not specified in the config file is "info"
+    /// The default level if not specified in the config file is "info"
     #[clap(short, long, arg_enum, value_parser)]
     log_level: Option<LogLevel>
 }
@@ -87,6 +91,13 @@ async fn bot(config: &Config) {
     }
 }
 
+async fn chat_id_discovery(config: &config::Telegram) {
+    pretty_env_logger::formatted_builder().parse_filters("info").init();
+    log::info!("Started bot in Chat ID discovery mode");
+    telegram::start_chat_id_discovery(config).await;
+    tokio::signal::ctrl_c().await.expect("failed to setup Ctrl-C handler");
+}
+
 fn check_config(config: &Config, check_only: &bool) {
 
     if *check_only { println!("Checking config...") }
@@ -104,11 +115,15 @@ async fn main() {
 
     check_config(&config, &cli.check_only);
 
-    if let Some(log_level) = cli.log_level {
-        config.log_level = log_level;
-    }
+    if cli.chat_id_discovery {
+        chat_id_discovery(&config.telegram).await;
+    } else {
+        if let Some(log_level) = cli.log_level {
+            config.log_level = log_level;
+        }
 
-    if !cli.check_only {
-        bot(&config).await;
+        if !cli.check_only {
+            bot(&config).await;
+        }
     }
 }

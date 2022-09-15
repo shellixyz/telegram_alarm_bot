@@ -2,5 +2,8 @@ X send PM to me when the bot is started (to catch restarts due to panics)
 X json configuration file
 X add /help command
 X improve status command: list sensors and "last seen"
-- better/cleaner error handling
-- add mode to discover chat IDs
+X better/cleaner error handling
+X add mode to discover chat IDs
+X add prev sensors data file to config
+X improve logging
+X add CLI option for log level
