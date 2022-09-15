@@ -11,7 +11,6 @@ pub type SharedBot = Arc<Mutex<AutoSend<Bot>>>;
 
 pub async fn start_repl(config: &config::Telegram, shared_state: ProtectedSharedState) -> SharedBot {
 
-    // let bot = Bot::from_env().auto_send();
     let bot = Bot::new(&config.token).auto_send();
     let shared_bot = Arc::new(Mutex::new(bot.clone()));
     let repl_shared_bot = shared_bot.clone();
@@ -20,7 +19,7 @@ pub async fn start_repl(config: &config::Telegram, shared_state: ProtectedShared
         repl_with_deps(bot, repl_shared_bot, shared_state, config.valid_chat_ids(), |message: Message, _bot: AutoSend<Bot>, shared_bot: SharedBot, shared_state: ProtectedSharedState, valid_chat_ids: Vec<ChatId>| async move {
             if valid_chat_ids.contains(&message.chat.id) {
                 if let Some(command) = message.text() {
-                    println!("Got message with text: {:?}", command);
+                    log::debug!("Got message with text: {:?}", command);
                     let locked_bot = shared_bot.lock().await;
                     handle_commands(&locked_bot, &message.chat.id, command, &shared_state).await;
                 }
@@ -83,8 +82,8 @@ async fn handle_commands(bot: &AutoSend<Bot>, chat_id: &ChatId, command: &str, s
     match command {
 
         "/battery" => {
-            let battery_info = locked_shared_data.prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
-                format!("• <b>{}</b>: {} / {} ({})", sensor_name, prev_sensor_data.common.battery_value_str(), prev_sensor_data.common.voltage_value_str(), prev_sensor_data.common.time_max_since_last_update_str())
+            let battery_info = locked_shared_data.prev_sensors_data.iter().map(|(_mqtt_topic, prev_sensor_data)| {
+                format!("• <b>{}</b>: {} / {} ({})", prev_sensor_data.name, prev_sensor_data.common.battery_value_str(), prev_sensor_data.common.voltage_value_str(), prev_sensor_data.common.time_max_since_last_update_str())
             }).collect::<Vec<String>>().join("\n");
             let message = if battery_info.is_empty() { "No data" } else { battery_info.as_str() };
             send_message(bot, chat_id, message).await
@@ -101,8 +100,8 @@ async fn handle_commands(bot: &AutoSend<Bot>, chat_id: &ChatId, command: &str, s
         },
 
         "/status" => {
-            let sensors_info = locked_shared_data.prev_sensors_data.iter().map(|(sensor_name, prev_sensor_data)| {
-                format!("• <b>{}</b>: last seen {} ago", sensor_name, prev_sensor_data.time_since_last_seen())
+            let sensors_info = locked_shared_data.prev_sensors_data.iter().map(|(_mqtt_topic, prev_sensor_data)| {
+                format!("• <b>{}</b>: last seen {} ago", prev_sensor_data.name, prev_sensor_data.time_since_last_seen())
             }).collect::<Vec<String>>();
 
             let sensors_info_str = if sensors_info.is_empty() { "no sensors seen".to_owned() } else { sensors_info.join("\n") };

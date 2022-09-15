@@ -1,5 +1,6 @@
 
 use rumqttc::{MqttOptions, AsyncClient, QoS, Event, Packet, EventLoop};
+use thiserror::Error;
 
 use crate::config;
 
@@ -24,8 +25,8 @@ pub async fn handle_events(event_loop: &mut EventLoop, config: &Config, shared_b
 
     match event_loop.poll().await {
         Ok(Event::Incoming(Packet::Publish(publish))) => {
-            if let Err(error_str) = process_zigbee2mqtt_publish_notification(publish, config, &shared_bot, &shared_state).await {
-                println!("Error processing zigbee2mqtt publish notification: {}", error_str);
+            if let Err(error_str) = process_publish_notification(publish, config, &shared_bot, &shared_state).await {
+                log::error!("Error processing publish notification: {}", error_str);
             }
         },
         Err(mqtt_connection_error) => log::error!("mqtt connection error: {}", mqtt_connection_error),
@@ -34,11 +35,20 @@ pub async fn handle_events(event_loop: &mut EventLoop, config: &Config, shared_b
 
 }
 
-async fn update_prev_sensor_data(shared_state: &ProtectedSharedState, topic: &String, sensor_payload_field_names_and_state_messages: &config::SensorPayloadFieldNameAndStateMessages, sensor_data: &sensors::Data) {
+async fn update_prev_sensor_data(shared_state: &ProtectedSharedState, topic: &String, sensor_name: &String, sensor_payload_field_names_and_state_messages: &config::SensorPayloadFieldNameAndStateMessages, sensor_data: &sensors::Data) {
     let mut locked_shared_state = shared_state.lock().await;
 
-    let prev_sensor_data = locked_shared_state.prev_sensors_data.entry(topic.clone()).or_default();
-    prev_sensor_data.last_seen_now();
+    let prev_sensor_data_entry = locked_shared_state.prev_sensors_data.entry(topic.clone());
+
+    let prev_sensor_data = match prev_sensor_data_entry {
+        std::collections::hash_map::Entry::Occupied(entry) => {
+            let data = entry.into_mut();
+            data.last_seen_now();
+            data
+        },
+        std::collections::hash_map::Entry::Vacant(entry) =>
+            entry.insert(sensors::PrevData::new(sensor_name.clone()))
+    };
 
     for field_name in sensor_payload_field_names_and_state_messages.payload_field_names() {
         if let Some(field_value) = sensor_data.get(field_name) {
@@ -71,14 +81,24 @@ async fn update_prev_sensor_data(shared_state: &ProtectedSharedState, topic: &St
     };
 }
 
-async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, config: &Config, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) -> Result<(), String> {
 
-    println!("topic: {}, payload: {:?}", publish.topic, publish.payload);
+#[derive(Debug, Error)]
+pub enum PublishNotificationProcessingError {
+    #[error("regex error")]
+    RegexError(regex::Error),
+    #[error("deserialization error")]
+    DeserializationError(serde_json::Error)
+}
+
+async fn process_publish_notification(publish: rumqttc::Publish, config: &Config, shared_bot: &SharedBot, shared_state: &ProtectedSharedState) -> Result<(), PublishNotificationProcessingError> {
+
+    log::debug!("got mqtt pushblish notification - topic: {}, payload: {:?}", publish.topic, publish.payload);
 
     let payload_string = String::from_utf8_lossy(&publish.payload).to_string();
-    let sensor_data: sensors::Data = serde_json::from_str(&payload_string).map_err(|_| "Failed to parse publish notification payload")?;
+    let sensor_data: sensors::Data = serde_json::from_str(&payload_string).map_err(|deser_err| PublishNotificationProcessingError::DeserializationError(deser_err))?;
 
-    if let Some((sensor_name_captures, sensor_payload_field_names_and_state_messages)) = config.mqtt_topics.match_topic(&publish.topic)? {
+    if let Some((sensor_name, sensor_name_captures, sensor_payload_field_names_and_state_messages)) =
+            config.mqtt_topics.match_topic(&publish.topic).map_err(|re_error| PublishNotificationProcessingError::RegexError(re_error))? {
         for (sensor_field_name, state_messages) in sensor_payload_field_names_and_state_messages.iter() {
             if let Some(sensor_value) = sensor_data.get(sensor_field_name) {
                 if let Some(message_template) = state_messages.get(sensor_value.to_string().as_str()) {
@@ -106,7 +126,7 @@ async fn process_zigbee2mqtt_publish_notification(publish: rumqttc::Publish, con
             }
         }
 
-        update_prev_sensor_data(shared_state, &publish.topic, sensor_payload_field_names_and_state_messages, &sensor_data).await;
+        update_prev_sensor_data(shared_state, &publish.topic, &sensor_name, sensor_payload_field_names_and_state_messages, &sensor_data).await;
 
     }
 

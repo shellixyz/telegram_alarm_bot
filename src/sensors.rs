@@ -1,14 +1,14 @@
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 use compound_duration::format_dhms;
 use serde::{Serialize,Deserialize};
 use derive_more::{Deref,DerefMut};
+use thiserror::Error;
 
 use crate::time::{LastSeenDuration,Timestamp};
 
-const SENSORS_DATA_PATH: &str = "sensors_data.json";
-
-pub type Data = HashMap<String, serde_json::Value>;
+pub type PayloadFieldName = String;
+pub type Data = HashMap<PayloadFieldName, serde_json::Value>;
 
 trait TimeSinceLastUpdate {
     fn time_since_last_update(&self) -> LastSeenDuration;
@@ -103,6 +103,7 @@ impl CommonState {
 
 }
 
+pub type SensorName = String;
 pub type SensorValue = serde_json::Value;
 
 pub type TriggerStates = HashMap<String, SensorValue>;
@@ -114,20 +115,22 @@ pub struct PrevData {
 
     pub update_timestamp: Timestamp,
 
+    pub name: SensorName,
+
     #[serde(skip)]
     pub trigger_states: TriggerStates
 }
 
-impl Default for PrevData {
-    fn default() -> Self {
+impl PrevData {
+
+    pub fn new(sensor_name: SensorName) -> Self {
         Self {
             common: Default::default(),
             update_timestamp: Timestamp::now(),
-            trigger_states: Default::default() }
+            name: sensor_name,
+            trigger_states: Default::default()
+        }
     }
-}
-
-impl PrevData {
 
     pub fn time_since_last_seen(&self) -> LastSeenDuration {
         LastSeenDuration::new(&self.update_timestamp)
@@ -149,9 +152,25 @@ impl PrevData {
 
 }
 
-type Name = String;
+type MqttTopic = String;
 
-type PrevSensorsDataInner = HashMap<Name, PrevData>;
+type PrevSensorsDataInner = HashMap<MqttTopic, PrevData>;
+
+#[derive(Debug, Error)]
+pub enum DataFileLoadError {
+    #[error("IO error")]
+    IOError(std::io::Error),
+    #[error("deserialization error")]
+    DeserializationError(serde_json::Error)
+}
+
+#[derive(Debug, Error)]
+pub enum DataFileSaveError {
+    #[error("IO error")]
+    IOError(std::io::Error),
+    #[error("deserialization error")]
+    SerializationError(serde_json::Error)
+}
 
 #[derive(Serialize,Deserialize,Default,Deref,DerefMut)]
 pub struct PrevSensorsData(PrevSensorsDataInner);
@@ -162,23 +181,25 @@ impl PrevSensorsData {
         Self(HashMap::new())
     }
 
-    pub fn save_to_file(&self) -> Result<(), String> {
+    pub fn save_to_file<S: AsRef<Path>>(&self, file_path: S) -> Result<(), DataFileSaveError> {
         match serde_json::to_string_pretty(self) {
-            Ok(prev_sensors_data_json) => if let Err(error) = std::fs::write(SENSORS_DATA_PATH, prev_sensors_data_json) {
-                Err(format!("sensors file write error: {}", error))
-            } else {
-                Ok(())
-            },
-            Err(error) => {
-                Err(format!("error serializing sensors data: {}", error))
-            }
+
+            Ok(prev_sensors_data_json) =>
+                if let Err(error) = std::fs::write(file_path, prev_sensors_data_json) {
+                    Err(DataFileSaveError::IOError(error))
+                } else {
+                    Ok(())
+                },
+
+            Err(error) => Err(DataFileSaveError::SerializationError(error))
+
         }
     }
 
-    pub fn load_from_file() -> Result<Self, String> {
-        let file = std::fs::File::open(SENSORS_DATA_PATH).map_err(|open_error| format!("open error: {}: {}", SENSORS_DATA_PATH, open_error))?;
+    pub fn load_from_file<S: AsRef<Path>>(file_path: S) -> Result<Self, DataFileLoadError> {
+        let file = std::fs::File::open(file_path).map_err(|open_error| DataFileLoadError::IOError(open_error))?;
         let reader = std::io::BufReader::new(file);
-        serde_json::from_reader(reader).map_err(|deser_err| format!("error deserializing sensors data: {}", deser_err))
+        serde_json::from_reader(reader).map_err(|deser_err| DataFileLoadError::DeserializationError(deser_err))
     }
 
 }

@@ -1,4 +1,5 @@
 
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::signal::unix::{signal,SignalKind};
@@ -21,17 +22,18 @@ struct Cli {
     #[clap(value_parser, default_value_t = String::from("config.json"))]
     config_file: String,
 
+    /// the default level if not specified in the config file is "info"
     #[clap(short, long, arg_enum, value_parser)]
     log_level: Option<LogLevel>
 }
 
 
-async fn terminate(source: &str, shared_state: ProtectedSharedState) -> ! {
+async fn terminate(source: &str, shared_state: ProtectedSharedState, config: &Config) -> ! {
     log::info!("received {}, terminating", source);
 
     let locked_shared_data = shared_state.lock().await;
 
-    if let Err(save_error) = locked_shared_data.prev_sensors_data.save_to_file() {
+    if let Err(save_error) = locked_shared_data.prev_sensors_data.save_to_file(&config.sensors_data_file) {
         log::info!("failed to save sensors data to file: {}", save_error);
     }
 
@@ -39,19 +41,22 @@ async fn terminate(source: &str, shared_state: ProtectedSharedState) -> ! {
 }
 
 async fn notify_start(shared_bot: &SharedBot, notification_chat_ids: &Vec<ChatId>) {
+    log::info!("bot started");
     let locked_bot = shared_bot.lock().await;
     for chat_id in notification_chat_ids {
         telegram::shared_bot_send_message(&locked_bot, chat_id, "Started").await;
     }
 }
 
-async fn load_prev_sensors_data(shared_state: &ProtectedSharedState) {
-    match PrevSensorsData::load_from_file() {
+async fn load_prev_sensors_data<S: AsRef<Path> + std::fmt::Debug>(prev_sensors_data_file_path: S, shared_state: &ProtectedSharedState) {
+    match PrevSensorsData::load_from_file(&prev_sensors_data_file_path) {
         Ok(prev_sensors_data_from_file) => {
             let mut shared_state_locked = shared_state.lock().await;
-            log::info!("loaded prev sensors data");
+            log::info!("loaded prev sensors data from file {:?}", prev_sensors_data_file_path);
             shared_state_locked.prev_sensors_data = prev_sensors_data_from_file;
         },
+        Err(sensors::DataFileLoadError::IOError(load_io_error)) if load_io_error.kind() == std::io::ErrorKind::NotFound =>
+            log::info!("prev sensors data file {:?} does not exist", prev_sensors_data_file_path),
         Err(load_error) => {
             log::error!("prev sensors data load error: {}", load_error);
         }
@@ -65,7 +70,7 @@ async fn bot(config: &Config) {
 
     let shared_state = Arc::new(Mutex::new(SharedState::new()));
 
-    load_prev_sensors_data(&shared_state).await;
+    load_prev_sensors_data(&config.sensors_data_file, &shared_state).await;
 
     let shared_bot = telegram::start_repl(&config.telegram, shared_state.clone()).await;
 
@@ -76,16 +81,18 @@ async fn bot(config: &Config) {
     loop {
         tokio::select! {
             () = mqtt::handle_events(&mut mqtt_event_loop, &config, &shared_bot, &shared_state) => {},
-            Ok(_) = tokio::signal::ctrl_c() => terminate("Ctrl-C", shared_state).await,
-            Some(_) = sigterm_stream.recv() => terminate("SIGTERM", shared_state).await
+            Ok(_) = tokio::signal::ctrl_c() => terminate("Ctrl-C", shared_state, &config).await,
+            Some(_) = sigterm_stream.recv() => terminate("SIGTERM", shared_state, &config).await
         }
     }
 }
 
-fn check_config(config: &Config) {
-    println!("Checking config...");
+fn check_config(config: &Config, check_only: &bool) {
+
+    if *check_only { println!("Checking config...") }
+
     match config.check() {
-        true => println!("OK"),
+        true => if *check_only { println!("OK") },
         false => std::process::exit(1)
     }
 }
@@ -95,7 +102,7 @@ async fn main() {
     let cli = Cli::parse();
     let mut config = config::Config::load_from_file(&cli.config_file).expect("config load error");
 
-    check_config(&config);
+    check_config(&config, &cli.check_only);
 
     if let Some(log_level) = cli.log_level {
         config.log_level = log_level;
