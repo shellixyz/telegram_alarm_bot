@@ -1,5 +1,6 @@
 {
     "log_level": "info",
+    "sensors_data_file": "sensors_data.json",
     "mqtt_broker": {
         "hostname": "localhost",
         "port": 1883
@@ -18,8 +19,8 @@
                 }
             },
             "^(?:(?P<location>\\w+) )?[Mm]otion sensor \\((?P<id>\\d+)\\)$": {
-                "vacancy": {
-                    "false": "Motion detected in {location} (sensor #{id})"
+                "occupancy": {
+                    "true": "Motion detected in {location} (sensor #{id})"
                 }
             }
         }
