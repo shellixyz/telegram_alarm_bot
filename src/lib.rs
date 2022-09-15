@@ -4,6 +4,7 @@ pub mod time;
 pub mod sensors;
 pub mod config;
 pub mod mqtt;
+pub mod log_level;
 
 use std::sync::Arc;
 use sensors::PrevSensorsData;

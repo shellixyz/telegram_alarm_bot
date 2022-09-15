@@ -9,6 +9,7 @@ use config::Config;
 use telegram::SharedBot;
 use sensors::PrevSensorsData;
 use telegram_alarm_bot::{SharedState,ProtectedSharedState};
+use telegram_alarm_bot::log_level::LogLevel;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -19,6 +20,9 @@ struct Cli {
 
     #[clap(value_parser, default_value_t = String::from("config.json"))]
     config_file: String,
+
+    #[clap(short, long, arg_enum, value_parser)]
+    log_level: Option<LogLevel>
 }
 
 
@@ -55,7 +59,7 @@ async fn load_prev_sensors_data(shared_state: &ProtectedSharedState) {
 }
 
 async fn bot(config: &Config) {
-    pretty_env_logger::formatted_builder().parse_filters("info").init();
+    pretty_env_logger::formatted_builder().parse_filters(config.log_level.to_string().as_str()).init();
 
     let mut sigterm_stream = signal(SignalKind::terminate()).expect("failed to setup termination handler");
 
@@ -89,11 +93,15 @@ fn check_config(config: &Config) {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let config = config::Config::load_from_file(&cli.config_file).expect("config load error");
+    let mut config = config::Config::load_from_file(&cli.config_file).expect("config load error");
 
-    if cli.check_only {
-        check_config(&config);
-    } else {
+    check_config(&config);
+
+    if let Some(log_level) = cli.log_level {
+        config.log_level = log_level;
+    }
+
+    if !cli.check_only {
         bot(&config).await;
     }
 }

@@ -4,6 +4,7 @@ use regex::Regex;
 use serde::Deserialize;
 use teloxide::types::ChatId;
 use derive_more::Deref;
+use crate::log_level::LogLevel;
 
 #[derive(Deserialize, Debug)]
 pub struct MqttBroker {
@@ -129,6 +130,9 @@ impl Telegram {
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
+    #[serde(default)]
+    pub log_level: LogLevel,
+
     pub mqtt_broker: Option<MqttBroker>,
 
     pub telegram: Telegram,
@@ -155,14 +159,17 @@ impl Config {
 
     pub fn check(&self) -> bool {
         let mut config_good = true;
+
+        // check sensor name regexes
         for (_, sensors) in self.mqtt_topics.iter() {
             for (sensor_name_re, _) in sensors.iter() {
                 if let Err(re_error) = Regex::new(&sensor_name_re) {
-                    println!("\n{re_error}");
+                    eprintln!("\n{re_error}");
                     config_good = false;
                 }
             }
         }
+
         config_good
     }
 
