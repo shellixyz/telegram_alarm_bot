@@ -23,6 +23,10 @@ struct Cli {
     #[clap(short = 'i', long, action)]
     chat_id_discovery: bool,
 
+    /// Start in test mode. The notifications are sent in the admin chats instead of notification chats
+    #[clap(short, long, action)]
+    test_mode: bool,
+
     #[clap(value_parser, default_value_t = String::from("config.json"))]
     config_file: String,
 
@@ -120,6 +124,15 @@ async fn main() {
     } else {
         if let Some(log_level) = cli.log_level {
             config.log_level = log_level;
+        }
+
+        if cli.test_mode {
+            if let Some(admin_chat_ids) = &config.telegram.admin_chat_ids {
+                config.telegram.notification_chat_ids = admin_chat_ids.clone();
+            } else {
+                eprintln!("Error: admin chat IDs have not been defined");
+                std::process::exit(1);
+            }
         }
 
         if !cli.check_only {
