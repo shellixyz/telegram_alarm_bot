@@ -153,8 +153,14 @@ pub async fn start_chat_id_discovery(config: &config::Telegram) {
     let bot = Bot::new(&config.token).auto_send();
     tokio::spawn(repl(bot, |message: Message, _bot: AutoSend<Bot>| async move {
         if let Some(message_text) = message.text() {
-            let (first_name, last_name) = (message.chat.first_name(), message.chat.last_name());
-            let chat_name = first_name.into_iter().chain(last_name.into_iter()).collect::<Vec<&str>>().join(" ");
+
+            let chat_name = if message.chat.is_private() {
+                let (first_name, last_name) = (message.chat.first_name(), message.chat.last_name());
+                first_name.into_iter().chain(last_name.into_iter()).collect::<Vec<&str>>().join(" ")
+            } else {
+                message.chat.title().unwrap_or_default().to_owned()
+            };
+
             log::info!("got text message from chat ID {} ({}): {}", message.chat.id, chat_name, message_text);
         }
         respond(())
