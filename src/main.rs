@@ -76,21 +76,21 @@ async fn bot(config: &Config) {
 
     let mut sigterm_stream = signal(SignalKind::terminate()).expect("failed to setup termination handler");
 
-    let shared_state = Arc::new(Mutex::new(SharedState::new()));
+    let shared_state = Arc::new(Mutex::new(SharedState::default()));
 
     load_prev_sensors_data(&config.sensors_data_file, &shared_state).await;
 
     let shared_bot = telegram::start_repl(&config.telegram, shared_state.clone()).await;
 
-    let mut mqtt_event_loop = mqtt::init(&config).await;
+    let mut mqtt_event_loop = mqtt::init(config).await;
 
     notify_start(&shared_bot, &config.telegram.notification_chat_ids).await;
 
     loop {
         tokio::select! {
-            () = mqtt::handle_events(&mut mqtt_event_loop, &config, &shared_bot, &shared_state) => {},
-            Ok(_) = tokio::signal::ctrl_c() => terminate("Ctrl-C", shared_state, &config).await,
-            Some(_) = sigterm_stream.recv() => terminate("SIGTERM", shared_state, &config).await
+            () = mqtt::handle_events(&mut mqtt_event_loop, config, &shared_bot, &shared_state) => {},
+            Ok(_) = tokio::signal::ctrl_c() => terminate("Ctrl-C", shared_state, config).await,
+            Some(_) = sigterm_stream.recv() => terminate("SIGTERM", shared_state, config).await
         }
     }
 }

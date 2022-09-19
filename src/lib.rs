@@ -15,8 +15,8 @@ pub struct SharedState {
     pub notifications_enabled: bool
 }
 
-impl SharedState {
-    pub fn new() -> Self {
+impl Default for SharedState {
+    fn default() -> Self {
         Self {
             prev_sensors_data: PrevSensorsData::new(),
             notifications_enabled: false

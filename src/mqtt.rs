@@ -25,7 +25,7 @@ pub async fn handle_events(event_loop: &mut EventLoop, config: &Config, shared_b
 
     match event_loop.poll().await {
         Ok(Event::Incoming(Packet::Publish(publish))) => {
-            if let Err(error_str) = process_publish_notification(publish, config, &shared_bot, &shared_state).await {
+            if let Err(error_str) = process_publish_notification(publish, config, shared_bot, shared_state).await {
                 log::error!("Error processing publish notification: {}", error_str);
             }
         },
@@ -38,10 +38,10 @@ pub async fn handle_events(event_loop: &mut EventLoop, config: &Config, shared_b
 
 }
 
-async fn update_prev_sensor_data(shared_state: &ProtectedSharedState, topic: &String, sensor_name: &String, sensor_payload_field_names_and_state_messages: &config::SensorPayloadFieldNameAndStateMessages, sensor_data: &sensors::Data) {
+async fn update_prev_sensor_data(shared_state: &ProtectedSharedState, topic: &str, sensor_name: &str, sensor_payload_field_names_and_state_messages: &config::SensorPayloadFieldNameAndStateMessages, sensor_data: &sensors::Data) {
     let mut locked_shared_state = shared_state.lock().await;
 
-    let prev_sensor_data_entry = locked_shared_state.prev_sensors_data.entry(topic.clone());
+    let prev_sensor_data_entry = locked_shared_state.prev_sensors_data.entry(topic.to_string());
 
     let prev_sensor_data = match prev_sensor_data_entry {
         std::collections::hash_map::Entry::Occupied(entry) => {
@@ -50,7 +50,7 @@ async fn update_prev_sensor_data(shared_state: &ProtectedSharedState, topic: &St
             data
         },
         std::collections::hash_map::Entry::Vacant(entry) =>
-            entry.insert(sensors::PrevData::new(sensor_name.clone()))
+            entry.insert(sensors::PrevData::new(sensor_name.to_string()))
     };
 
     for field_name in sensor_payload_field_names_and_state_messages.payload_field_names() {
@@ -98,10 +98,10 @@ async fn process_publish_notification(publish: rumqttc::Publish, config: &Config
     log::debug!("got mqtt pushblish notification - topic: {}, payload: {:?}", publish.topic, publish.payload);
 
     let payload_string = String::from_utf8_lossy(&publish.payload).to_string();
-    let sensor_data: sensors::Data = serde_json::from_str(&payload_string).map_err(|deser_err| PublishNotificationProcessingError::DeserializationError(deser_err))?;
+    let sensor_data: sensors::Data = serde_json::from_str(&payload_string).map_err(PublishNotificationProcessingError::DeserializationError)?;
 
     if let Some((sensor_name, sensor_name_captures, sensor_payload_field_names_and_state_messages)) =
-            config.mqtt_topics.match_topic(&publish.topic).map_err(|re_error| PublishNotificationProcessingError::RegexError(re_error))? {
+            config.mqtt_topics.match_topic(&publish.topic).map_err(PublishNotificationProcessingError::RegexError)? {
         for (sensor_field_name, state_messages) in sensor_payload_field_names_and_state_messages.iter() {
             if let Some(sensor_value) = sensor_data.get(sensor_field_name) {
                 if let Some(message_template) = state_messages.get(sensor_value.to_string().as_str()) {
@@ -116,7 +116,7 @@ async fn process_publish_notification(publish: rumqttc::Publish, config: &Config
                         let mut message = message_template.clone();
                         for (cname, cstr) in &sensor_name_captures {
                             if let Some(cstr) = cstr {
-                                message.replace_range(0.., message.replace(format!("{{{cname}}}").as_str(), &cstr).as_str());
+                                message.replace_range(0.., message.replace(format!("{{{cname}}}").as_str(), cstr).as_str());
                             }
                         }
 

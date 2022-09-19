@@ -197,9 +197,9 @@ impl PrevSensorsData {
     }
 
     pub fn load_from_file<S: AsRef<Path>>(file_path: S) -> Result<Self, DataFileLoadError> {
-        let file = std::fs::File::open(file_path).map_err(|open_error| DataFileLoadError::IOError(open_error))?;
+        let file = std::fs::File::open(file_path).map_err(DataFileLoadError::IOError)?;
         let reader = std::io::BufReader::new(file);
-        serde_json::from_reader(reader).map_err(|deser_err| DataFileLoadError::DeserializationError(deser_err))
+        serde_json::from_reader(reader).map_err(DataFileLoadError::DeserializationError)
     }
 
 }

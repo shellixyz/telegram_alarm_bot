@@ -74,7 +74,7 @@ pub struct MqttTopics(MqttTopicsInner);
 impl MqttTopics {
 
     // returns: captures, sensor_payload_field_names_and_state_messages
-    pub fn match_topic(&self, topic: &String) -> Result<Option<(SensorName, SensorNameCaptures, &SensorPayloadFieldNameAndStateMessages)>, regex::Error> {
+    pub fn match_topic(&self, topic: &str) -> Result<Option<(SensorName, SensorNameCaptures, &SensorPayloadFieldNameAndStateMessages)>, regex::Error> {
         let tmatch = self.0.iter().find(|(topic_base, _)| {
             let base_slash = (*topic_base).clone() + "/";
             topic.starts_with(&base_slash)
@@ -162,9 +162,9 @@ pub struct Config {
 impl Config {
 
     pub fn load_from_file(path: &str) -> Result<Self, ConfigFileLoadError> {
-        let file = std::fs::File::open(path).map_err(|open_error| ConfigFileLoadError::IOError(open_error))?;
+        let file = std::fs::File::open(path).map_err(ConfigFileLoadError::IOError)?;
         let reader = std::io::BufReader::new(file);
-        serde_json::from_reader(reader).map_err(|deser_err| ConfigFileLoadError::DeserializationError(deser_err))
+        serde_json::from_reader(reader).map_err(ConfigFileLoadError::DeserializationError)
     }
 
     pub fn mqtt_topics(&self) -> Vec<&String> {
@@ -181,7 +181,7 @@ impl Config {
         // check sensor name regexes
         for (_, sensors) in self.mqtt_topics.iter() {
             for (sensor_name_re, _) in sensors.iter() {
-                if let Err(re_error) = Regex::new(&sensor_name_re) {
+                if let Err(re_error) = Regex::new(sensor_name_re) {
                     eprintln!("\n{re_error}");
                     config_good = false;
                 }
